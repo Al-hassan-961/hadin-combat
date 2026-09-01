@@ -3,6 +3,7 @@
 > **The AI Opponent That Learns Your Fighting DNA** — *"Unlock the hidden techniques within you"*
 
 ![Build Passing](https://img.shields.io/badge/build-passing-brightgreen)
+![CI](https://github.com/Al-hassan-961/hadin-combat/actions/workflows/ci.yml/badge.svg)
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB)
 ![HTML5](https://img.shields.io/badge/HTML5-Mobile%20First-E34F26)
