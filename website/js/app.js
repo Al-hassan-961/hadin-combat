@@ -289,8 +289,47 @@
         }
     });
 
-    // Ensure the overlay canvas mirrors like the video.
-    // (The transform is already applied in CSS on #overlay.)
+    // ---- Connection / share bar ---------------------------------------------
+    function setupConnectBar() {
+        const url = location.protocol + '//' + location.host + '/';
+        els.connectUrl = document.getElementById('connectUrl');
+        els.copyUrl = document.getElementById('copyUrl');
+        if (els.connectUrl) els.connectUrl.textContent = url;
+
+        if (els.copyUrl) {
+            els.copyUrl.addEventListener('click', async () => {
+                try {
+                    await navigator.clipboard.writeText(url);
+                    els.copyUrl.textContent = '✓';
+                    setTimeout(() => (els.copyUrl.textContent = '📋'), 1500);
+                } catch (_) {
+                    // Clipboard blocked (non-HTTPS); fall back to selecting.
+                    if (els.connectUrl) {
+                        const range = document.createRange();
+                        range.selectNodeContents(els.connectUrl);
+                        const sel = window.getSelection();
+                        sel.removeAllRanges();
+                        sel.addRange(range);
+                    }
+                }
+            });
+        }
+    }
+
+    // Poll the health endpoint so the UI reflects live server state.
+    function pollHealth() {
+        fetch('/api/health')
+            .then((r) => r.json())
+            .then((d) => {
+                setPill('v' + (d.version || '?') + ' · ' + (d.backend || '?'), d.backend || 'none');
+            })
+            .catch(() => setPill('offline', 'none'));
+    }
+
+    // ---- Init -----------------------------------------------------------------
+    setupConnectBar();
+    pollHealth();
+    setInterval(pollHealth, 10000);
 
     // Initial connection attempt.
     connect();

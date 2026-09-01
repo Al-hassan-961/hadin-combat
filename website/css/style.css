@@ -80,6 +80,38 @@ body {
 .backend-pill.mediapipe { color: #ffd166; border-color: rgba(255, 209, 102, 0.3); }
 .backend-pill.none { color: var(--accent); }
 
+/* ---- Connection / share bar ------------------------------------------------ */
+.connect-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--bg-2);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 0.75rem;
+    flex-wrap: wrap;
+}
+.connect-label { color: var(--muted); font-weight: 600; }
+.connect-url {
+    background: var(--panel);
+    color: var(--neon);
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    word-break: break-all;
+}
+.connect-copy {
+    background: var(--neon-dim);
+    color: var(--neon);
+    border: none;
+    border-radius: 6px;
+    width: 26px;
+    height: 26px;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+.connect-note { color: var(--muted); margin-left: auto; }
+
 /* ---- Stage -------------------------------------------------------------- */
 .stage-wrap {
     flex: 1;

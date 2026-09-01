@@ -47,6 +47,16 @@ def test_rest_stats(client):
     assert "sessions" in data
 
 
+def test_health(client):
+    r = client.get("/api/health")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] == "ok"
+    assert data["name"] == "hadin-combat"
+    assert "version" in data
+    assert data["backend"] == "opencv"
+
+
 def test_websocket_hello_and_frame(client):
     with client.websocket_connect("/ws/e2e-test") as ws:
         hello = ws.receive_json()

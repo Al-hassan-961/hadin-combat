@@ -83,10 +83,8 @@ ok "Configuration written."
 
 # ---------- 4. run ---------------------------------------------------------------
 info "Step 4/4: Starting server..."
-LOCAL_IP="${LOCAL_IP:-127.0.0.1}"
 echo
-echo -e "${C_BOLD}${C_GREEN}✅ Server running at http://${LOCAL_IP}:8000 – open this URL in your browser!${C_RESET}"
+info "Launching HADIN-COMBAT (run.sh prints the access URL + QR) ..."
 echo
 
-cd python-backend
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+exec bash "$PROJECT_DIR/scripts/run.sh" --port 8000

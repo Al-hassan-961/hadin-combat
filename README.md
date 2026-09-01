@@ -120,6 +120,35 @@ bash scripts/setup_dev.sh
 
 ---
 
+## 🌐 Accessing from your phone / local network
+
+The server binds to `0.0.0.0`, so **any device on the same Wi‑Fi** can open it.
+When you start it via `run.sh` (the quickstarts call this automatically), it:
+
+1. **Detects your local IP** and prints the exact URL.
+2. Shows a **scannable QR code** (install `pkg install qrencode` on Termux) so you
+   can open it on another phone with your camera.
+3. Optionally opens your browser: `bash scripts/run.sh --open`.
+
+```bash
+# Same device / localhost:
+bash scripts/run.sh --port 8000
+# → http://127.0.0.1:8000   and   http://<your-lan-ip>:8000
+```
+
+Health check: `curl http://127.0.0.1:8000/api/health` → `{"status":"ok","version":"1.0.0",...}`
+
+> 🔍 **Troubleshooting**
+> - **Browser can't connect** → ensure you're on the same network, the phone's Wi‑Fi
+>   isolation is off, and the firewall allows port `8000`.
+> - **QR not shown** → `pkg install qrencode` then restart `run.sh`.
+> - **Camera denied** → allow camera permission in your browser, and use HTTPS or
+>   `localhost` (cameras are blocked on insecure origins for non-local hosts).
+> - **See `backend: opencv`** → that's the OpenCV motion fallback (works out of the
+>   box). `mediapipe`/`cpp` appear when those are installed.
+
+---
+
 ## 🧭 Next Steps
 
 - **[Setup Guide](docs/SETUP.md)** — manual install on Linux, macOS, and Termux.

@@ -49,6 +49,9 @@ logger = logging.getLogger("hadin")
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 
+# Server process start time, used by the /api/health uptime field.
+_START_TIME: float = time.time()
+
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -75,10 +78,12 @@ MODEL_PATHS = {
     "coevolution": Path(os.getenv("COEVOLUTION_PATH", MODELS_DIR / "coevolution.onnx")),
 }
 
+__version__ = "1.0.0"
+
 app = FastAPI(
     title="HADIN-COMBAT",
     description="The AI Opponent That Learns Your Fighting DNA",
-    version="1.0.0",
+    version=__version__,
 )
 
 
@@ -411,6 +416,17 @@ async def handle_json(websocket: WebSocket, client_id: str, text: str) -> None:
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/api/health")
+async def api_health() -> JSONResponse:
+    return JSONResponse({
+        "status": "ok",
+        "name": "hadin-combat",
+        "version": __version__,
+        "backend": ai_core.backend,
+        "uptime_s": round(time.time() - _START_TIME, 1),
+    })
 
 
 @app.get("/api/stats")

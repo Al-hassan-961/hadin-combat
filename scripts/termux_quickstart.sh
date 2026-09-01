@@ -55,10 +55,10 @@ info "Step 2/6: Installing pre-built Termux packages (numpy + OpenCV)..."
 # needs to compile C extensions. clang/cmake are only for the optional C++ core.
 pkg install -y \
     git python clang cmake make pkg-config binutils \
-    python-numpy python-opencv-python \
+    python-numpy python-opencv-python qrencode \
     >/dev/null 2>&1 || {
         warn "Some packages failed. At minimum you need: pkg install python-numpy python-opencv-python"
-        warn "Re-run: pkg install -y python-numpy python-opencv-python"
+        warn "Re-run: pkg install -y python-numpy python-opencv-python qrencode"
     }
 ok "Pre-built native dependencies installed (no C compilation)."
 
@@ -113,17 +113,8 @@ PORT=8000
 EOF
 ok "Configuration written to python-backend/.env"
 
-# Detect local IP for the friendly access message.
-LOCAL_IP="$(ifconfig 2>/dev/null | awk '/inet / && $2 !~ /^127/ {print $2; exit}' || true)"
-LOCAL_IP="${LOCAL_IP:-127.0.0.1}"
-
+# Launch via the professional, Termux-aware launcher (prints URLs + QR code).
 echo
-echo -e "${C_BOLD}${C_GREEN}════════════════════════════════════════════════════════════════════${C_RESET}"
-echo -e "${C_GREEN}  🚀 Starting HADIN-COMBAT server...${C_RESET}"
-echo -e "${C_BOLD}${C_GREEN}  ✅ Server running at http://${LOCAL_IP}:8000 – open this URL in your browser!${C_RESET}"
-echo -e "${C_GREEN}  Backend: $([ "$USE_CPP" = "true" ] && echo "C++ ONNX core" || echo "MediaPipe/OpenCV (pure Python)")${C_RESET}"
-echo -e "${C_BOLD}${C_GREEN}════════════════════════════════════════════════════════════════════${C_RESET}"
+info "Launching HADIN-COMBAT (run.sh detects your IP and prints the access URL) ..."
 echo
-
-cd python-backend
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+exec bash "$PROJECT_DIR/scripts/run.sh" --port 8000
