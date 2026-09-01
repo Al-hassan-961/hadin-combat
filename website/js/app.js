@@ -1,0 +1,297 @@
+/*
+ * HADIN-COMBAT – js/app.js
+ * Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
+ * All rights reserved.
+ *
+ * Handles camera capture, WebSocket streaming, skeleton/opponent overlays,
+ * real-time feedback, and automatic reconnection.
+ */
+(function () {
+    'use strict';
+
+    const $ = (id) => document.getElementById(id);
+
+    const els = {
+        video: $('camera'),
+        overlay: $('overlay'),
+        startBtn: $('startBtn'),
+        resetBtn: $('resetBtn'),
+        stageMessage: $('stageMessage'),
+        backendPill: $('backendPill'),
+        hudFps: $('hudFps'),
+        hudLatency: $('hudLatency'),
+        hudDifficulty: $('hudDifficulty'),
+        grade: $('grade'),
+        feedbackList: $('feedbackList'),
+    };
+
+    const ctx = els.overlay.getContext('2d');
+    const CLIENT_ID = 'web-' + Math.random().toString(36).slice(2, 10);
+
+    // COCO 17 keypoint bone connections.
+    const BONES = [
+        [0,1],[0,2],[1,3],[2,4],[5,6],[5,7],[7,9],[6,8],[8,10],
+        [5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16],
+    ];
+
+    let ws = null;
+    let running = false;
+    let stream = null;
+    let captureTimer = null;
+    let lastFrameTime = 0;
+    let framesInWindow = 0;
+    let fpsWindowStart = 0;
+
+    // ---- WebSocket connection with auto-reconnect -------------------------
+    function connect() {
+        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+        const url = `${proto}://${location.host}/ws/${CLIENT_ID}`;
+        ws = new WebSocket(url);
+
+        ws.onopen = () => {
+            setPill('connected', 'cpp');
+            addFeedback('Session connected. Ready to train.');
+        };
+
+        ws.onmessage = (event) => onMessage(event.data);
+
+        ws.onclose = () => {
+            setPill('reconnecting…', 'none');
+            setTimeout(connect, 1500);
+        };
+
+        ws.onerror = () => ws.close();
+    }
+
+    function onMessage(raw) {
+        let msg;
+        try {
+            msg = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        } catch (_) {
+            return;
+        }
+
+        if (msg.type === 'hello') {
+            setPill(msg.backend, msg.backend);
+            addFeedback(msg.message);
+            return;
+        }
+        if (msg.type === 'frame') {
+            renderFrame(msg);
+            return;
+        }
+        if (msg.type === 'feedback') {
+            addFeedback(msg.message);
+        }
+        if (msg.type === 'reset_ack') {
+            addFeedback('Difficulty reset to ' + Math.round(msg.difficulty * 100) + '%.');
+        }
+        if (msg.type === 'error') {
+            addFeedback('⚠ ' + (msg.message || 'Unknown error'));
+        }
+    }
+
+    // ---- Camera -----------------------------------------------------------
+    async function startCamera() {
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+                audio: false,
+            });
+            els.video.srcObject = stream;
+            await els.video.play();
+            els.stageMessage.style.display = 'none';
+        } catch (err) {
+            els.stageMessage.innerHTML =
+                '<div class="msg-box"><span class="msg-emoji">📵</span>' +
+                '<p>Camera unavailable. Grant camera permission.</p></div>';
+            console.error(err);
+        }
+    }
+
+    function stopCamera() {
+        if (stream) {
+            stream.getTracks().forEach((t) => t.stop());
+            stream = null;
+        }
+        if (captureTimer) {
+            clearInterval(captureTimer);
+            captureTimer = null;
+        }
+        els.overlay.width = els.overlay.height = 0;
+    }
+
+    // ---- Frame capture -----------------------------------------------------
+    function captureLoop() {
+        // ~15 fps stream keeps bandwidth and latency low.
+        const FPS = 15;
+        const interval = Math.max(50, Math.round(1000 / FPS));
+        captureTimer = setInterval(() => {
+            if (!running || !els.video.readyState) return;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = els.video.videoWidth || 320;
+            canvas.height = els.video.videoHeight || 240;
+            const c = canvas.getContext('2d');
+            // Un-mirror for the server so coordinates match raw pixels.
+            c.translate(canvas.width, 0);
+            c.scale(-1, 1);
+            c.drawImage(els.video, 0, 0);
+            canvas.toBlob((blob) => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(blob);
+                    updateFps();
+                }
+            }, 'image/jpeg', 0.7);
+        }, interval);
+    }
+
+    function updateFps() {
+        const now = performance.now();
+        framesInWindow++;
+        if (!fpsWindowStart) fpsWindowStart = now;
+        if (now - fpsWindowStart >= 1000) {
+            const fps = Math.round((framesInWindow * 1000) / (now - fpsWindowStart));
+            els.hudFps.textContent = fps + ' fps';
+            framesInWindow = 0;
+            fpsWindowStart = now;
+        }
+    }
+
+    // ---- Rendering ----------------------------------------------------------
+    function renderFrame(msg) {
+        const w = els.video.videoWidth || 320;
+        const h = els.video.videoHeight || 240;
+        els.overlay.width = w;
+        els.overlay.height = h;
+
+        // Base debug frame sent by the server (skeleton already drawn).
+        if (msg.debug_frame) {
+            const img = new Image();
+            img.onload = () => ctx.drawImage(img, 0, 0, w, h);
+            img.src = 'data:image/jpeg;base64,' + msg.debug_frame;
+        } else if (msg.keypoints) {
+            drawSkeleton(msg.keypoints, w, h);
+        }
+
+        // Opponent overlay (drawn as a ghost).
+        if (msg.opponent && msg.opponent.length) {
+            drawOpponent(msg.opponent, w, h);
+        }
+
+        els.hudLatency.textContent = (msg.latency_ms || 0) + ' ms';
+        els.hudDifficulty.textContent =
+            'Difficulty: ' + Math.round((msg.difficulty || 0) * 100) + '%';
+
+        if (msg.feedback) {
+            updateFeedback(msg.feedback);
+        }
+    }
+
+    function drawSkeleton(kps, w, h) {
+        const pts = kps.map((k) => ({
+            x: k.x, y: k.y, on: (k.score || 0) >= 0.3,
+        }));
+
+        ctx.strokeStyle = '#00ffc8';
+        ctx.lineWidth = Math.max(2, w / 200);
+        ctx.lineCap = 'round';
+        for (const [a, b] of BONES) {
+            if (pts[a] && pts[b] && pts[a].on && pts[b].on) {
+                ctx.beginPath();
+                ctx.moveTo(pts[a].x, pts[a].y);
+                ctx.lineTo(pts[b].x, pts[b].y);
+                ctx.stroke();
+            }
+        }
+        ctx.fillStyle = '#00ffc8';
+        for (const p of pts) {
+            if (!p.on) continue;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, Math.max(2, w / 300), 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    function drawOpponent(opp, w, h) {
+        ctx.save();
+        ctx.globalAlpha = 0.55;
+        ctx.strokeStyle = '#ff285c';
+        ctx.lineWidth = Math.max(2, w / 160);
+        ctx.lineCap = 'round';
+        for (const [a, b] of BONES) {
+            const pa = opp[a], pb = opp[b];
+            if (pa && pb) {
+                ctx.beginPath();
+                ctx.moveTo(pa.x * w, pa.y * h);
+                ctx.lineTo(pb.x * w, pb.y * h);
+                ctx.stroke();
+            }
+        }
+        ctx.fillStyle = '#ff285c';
+        for (const k of opp) {
+            ctx.beginPath();
+            ctx.arc(k.x * w, k.y * h, Math.max(3, w / 200), 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    // ---- Feedback UI ---------------------------------------------------------
+    function updateFeedback(fb) {
+        els.grade.textContent = fb.grade || 'C';
+        els.grade.className = 'grade ' + (fb.grade || 'c').toLowerCase();
+        els.feedbackList.innerHTML = '';
+        const notes = (fb.notes && fb.notes.length) ? fb.notes : ['Keep moving – stay active.'];
+        notes.slice(0, 3).forEach((n) => {
+            const li = document.createElement('li');
+            li.textContent = n;
+            els.feedbackList.appendChild(li);
+        });
+    }
+
+    function addFeedback(text) {
+        const li = document.createElement('li');
+        li.textContent = text;
+        els.feedbackList.prepend(li);
+        while (els.feedbackList.children.length > 3) {
+            els.feedbackList.removeChild(els.feedbackList.lastChild);
+        }
+    }
+
+    // ---- Status pill -----------------------------------------------------------
+    function setPill(text, cls) {
+        els.backendPill.textContent = text;
+        els.backendPill.className = 'backend-pill ' + (cls || '');
+    }
+
+    // ---- Controls ---------------------------------------------------------------
+    els.startBtn.addEventListener('click', async () => {
+        if (!running) {
+            await startCamera();
+            running = true;
+            els.startBtn.textContent = '■ Stop';
+            els.startBtn.classList.add('recording');
+            captureLoop();
+            if (!ws || ws.readyState !== WebSocket.OPEN) connect();
+        } else {
+            running = false;
+            els.startBtn.textContent = '▶ Start';
+            els.startBtn.classList.remove('recording');
+            stopCamera();
+            els.stageMessage.style.display = 'flex';
+        }
+    });
+
+    els.resetBtn.addEventListener('click', () => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'reset' }));
+        }
+    });
+
+    // Ensure the overlay canvas mirrors like the video.
+    // (The transform is already applied in CSS on #overlay.)
+
+    // Initial connection attempt.
+    connect();
+})();

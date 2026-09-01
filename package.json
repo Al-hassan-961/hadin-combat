@@ -1,0 +1,19 @@
+{
+  "name": "hadin-combat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HADIN-COMBAT – The AI Opponent That Learns Your Fighting DNA",
+  "license": "MIT",
+  "author": "Al-hassan Shehade & Dina Balcheh",
+  "scripts": {
+    "web:check": "node scripts/lint-js.js",
+    "lint": "eslint website/js/*.js --fix",
+    "build:cpp": "cmake -S cpp -B build && cmake --build build"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

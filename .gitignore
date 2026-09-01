@@ -1,0 +1,77 @@
+# ---------------------------------------------------------------------------
+# HADIN-COMBAT – global ignore rules
+# Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
+# ---------------------------------------------------------------------------
+
+# ---- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+wheels/
+*.egg
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# ---- C++ / CMake ----------------------------------------------------------
+/build/
+build-*/
+cmake-build-*/
+*.o
+*.obj
+*.so
+*.so.*
+*.a
+*.dylib
+*.dll
+*.exe
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+install_manifest.txt
+
+# ---- ONNX Runtime / models -------------------------------------------------
+models/*.onnx
+models/*.bin
+models/*.weights
+!models/README.md
+
+# ---- Web / JS --------------------------------------------------------------
+node_modules/
+*.min.js
+dist-web/
+web/assets/
+
+# ---- Environment & secrets -------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
+# ---- Editors & OS -----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ---- Logs & caches ---------------------------------------------------------
+*.log
+logs/
+*.pid
+.cache/
+
+# ---- Docker ----------------------------------------------------------------
+docker-compose.override.yml
+*.sqlite3

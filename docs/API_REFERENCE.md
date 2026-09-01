@@ -1,0 +1,155 @@
+# HADIN-COMBAT API Reference
+
+## WebSocket Endpoint
+
+### `WS /ws/{client_id}`
+
+Establishes a bidirectional real-time session. `client_id` is any unique
+string (the web client generates one like `web-abc123def`).
+
+### Client → Server
+
+**Binary message (JPEG frame)**
+
+A raw JPEG byte payload is decoded to a frame and processed.
+
+**JSON control messages**
+
+| `type` | Payload | Description |
+|---|---|---|
+| `reset` | `{}` | Reset difficulty to `0.4` and clear frame counter. |
+| `feedback_text` | `{"text": "..."}` | Echo a custom coaching message back. |
+
+Example:
+```json
+{ "type": "reset" }
+```
+
+### Server → Client
+
+**`hello`** — sent immediately after connection:
+```json
+{
+  "type": "hello",
+  "backend": "cpp",
+  "message": "HADIN-COMBAT ready. Begin your session."
+}
+```
+
+**`frame`** — sent per processed frame:
+```json
+{
+  "type": "frame",
+  "client_id": "web-abc123def",
+  "keypoints": [
+    { "x": 312.0, "y": 90.0, "score": 0.97 }
+  ],
+  "opponent": [
+    { "x": 0.42, "y": 0.31, "score": 1.0 }
+  ],
+  "feedback": {
+    "grade": "B",
+    "score": 82,
+    "notes": ["Center your shoulders over your hips for better balance."]
+  },
+  "difficulty": 0.41,
+  "latency_ms": 31.2,
+  "backend": "cpp",
+  "debug_frame": "<base64-jpeg>"
+}
+```
+
+**`feedback`** — custom message:
+```json
+{ "type": "feedback", "message": "Keep your guard up!" }
+```
+
+**`reset_ack`** — after a reset:
+```json
+{ "type": "reset_ack", "difficulty": 0.4 }
+```
+
+**`ack`** — generic acknowledgment:
+```json
+{ "type": "ack", "received": "feedback_text" }
+```
+
+**`error`** — error notification:
+```json
+{ "type": "error", "message": "Bad JSON" }
+```
+
+---
+
+## REST Endpoints
+
+### `GET /`
+
+Serves `website/index.html` (the mobile-first frontend).
+
+### `GET /api/stats`
+
+Returns backend status, active sessions, and athlete profile:
+
+```json
+{
+  "backend": "cpp",
+  "sessions": [
+    { "client_id": "web-abc123def", "frames": 120, "fps": 14.9,
+      "difficulty": 0.41, "style_tags": [] }
+  ],
+  "profile": {
+    "athlete_id": "local",
+    "total_sessions": 0,
+    "total_rounds": 0,
+    "win_rate": 0.5,
+    "avg_response_ms": 0.0,
+    "progress_score": 0.0
+  },
+  "latency_target_ms": 50
+}
+```
+
+### Static assets
+
+- `GET /static/*` — when a local `static/` copy exists (otherwise the website
+  directory at the repo root is served directly).
+
+---
+
+## Data Schemas
+
+### Keypoint
+
+| Field | Type | Description |
+|---|---|---|
+| `x` | number | x coordinate (pixels, absolute) |
+| `y` | number | y coordinate (pixels, absolute) |
+| `score` | number | confidence 0..1 |
+
+### Opponent point
+
+| Field | Type | Description |
+|---|---|---|
+| `x` | number | normalized x 0..1 |
+| `y` | number | normalized y 0..1 |
+| `score` | number | always `1.0` for generated poses |
+
+### Feedback
+
+| Field | Type | Description |
+|---|---|---|
+| `grade` | string | `A`, `B`, or `C` |
+| `score` | number | 0..100 quality score |
+| `notes` | string[] | coaching tips |
+
+### AthleteProfile
+
+| Field | Type | Description |
+|---|---|---|
+| `athlete_id` | string | unique id |
+| `total_sessions` | integer | completed sessions |
+| `total_rounds` | integer | total rounds fought |
+| `win_rate` | number | 0..1 |
+| `avg_response_ms` | number | average reaction time (ms) |
+| `progress_score` | number | 0..1 improvement trend |

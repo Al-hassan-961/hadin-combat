@@ -1,0 +1,11 @@
+# ---------------------------------------------------------------------------
+# HADIN-COMBAT – optional backend dependencies
+# Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
+# All rights reserved.
+#
+# MediaPipe provides a better pose estimator than the OpenCV motion fallback.
+# Install OPTIONALLY — if it fails on your platform, the app still works with
+# the pure-OpenCV fallback. Install with:
+#   pip install -r python-backend/requirements-optional.txt   (ignore errors)
+# ---------------------------------------------------------------------------
+mediapipe==0.10.14

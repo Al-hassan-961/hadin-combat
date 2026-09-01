@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# HADIN-COMBAT – Docker Compose
+# Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
+# ---------------------------------------------------------------------------
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: python-backend/Dockerfile
+    container_name: hadin-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - USE_CPP_CORE=${USE_CPP_CORE:-true}
+      - FALLBACK_TO_PYTHON=${FALLBACK_TO_PYTHON:-true}
+      - REDIS_URL=redis://redis:6379/0
+      - POSE_MODEL_PATH=/app/models/pose.onnx
+      - STYLE_ENCODER_PATH=/app/models/style_encoder.onnx
+      - OPPONENT_GENERATOR_PATH=/app/models/opponent_generator.onnx
+      - COEVOLUTION_PATH=/app/models/coevolution.onnx
+    volumes:
+      - ./models:/app/models:ro
+      - ./cpp:/app/cpp:ro
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: hadin-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:

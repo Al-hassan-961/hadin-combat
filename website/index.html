@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<!--
+ * HADIN-COMBAT – index.html
+ * Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
+ * All rights reserved.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0a12" />
+    <title>HADIN-COMBAT · The AI Opponent That Learns Your Fighting DNA</title>
+    <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+    <header class="app-header">
+        <div class="brand">
+            <span class="brand-mark">🥋</span>
+            <div class="brand-text">
+                <h1>HADIN<span class="accent">-COMBAT</span></h1>
+                <p class="tagline">The AI opponent that learns your fighting DNA</p>
+            </div>
+        </div>
+        <div class="backend-pill" id="backendPill">connecting…</div>
+    </header>
+
+    <main class="stage-wrap">
+        <!-- Camera stage -->
+        <section class="stage" id="stage">
+            <video id="camera" playsinline muted autoplay></video>
+            <canvas id="overlay"></canvas>
+
+            <div class="stage-message" id="stageMessage">
+                <div class="msg-box">
+                    <span class="msg-emoji">🎯</span>
+                    <p>Enable your camera to begin your session.</p>
+                </div>
+            </div>
+
+            <div class="hud hud-top-left" id="hudFps">— fps</div>
+            <div class="hud hud-top-right" id="hudLatency">— ms</div>
+            <div class="hud hud-difficulty" id="hudDifficulty">Difficulty: 40%</div>
+        </section>
+
+        <!-- Feedback panel -->
+        <section class="feedback" id="feedbackPanel">
+            <div class="feedback-head">
+                <h2>Coach Feedback</h2>
+                <span class="grade" id="grade">C</span>
+            </div>
+            <ul class="feedback-list" id="feedbackList">
+                <li>Start your session to receive live coaching.</li>
+            </ul>
+        </section>
+    </main>
+
+    <!-- Controls -->
+    <nav class="controls">
+        <button id="startBtn" class="btn btn-primary">▶ Start</button>
+        <button id="resetBtn" class="btn btn-ghost">↺ Reset</button>
+        <a href="/api/stats" class="btn btn-ghost">📊 Stats</a>
+    </nav>
+
+    <footer class="app-footer">
+        <p>
+            HADIN = <strong>HA</strong>ssan + <strong>DIN</strong>a — human skill fused with machine intelligence.
+        </p>
+        <p class="creators">
+            © 2026 <a href="https://github.com/Al-hassan-961">Al-hassan Shehade</a>
+            &amp; <a href="https://github.com/">Dina Balcheh</a>
+        </p>
+    </footer>
+
+    <script src="js/app.js"></script>
+</body>
+</html>

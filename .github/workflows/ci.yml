@@ -1,0 +1,72 @@
+# ---------------------------------------------------------------------------
+# HADIN-COMBAT – CI workflow
+# Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
+# ---------------------------------------------------------------------------
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  cpp-build:
+    name: Build C++ core (Ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ONNX Runtime + pybind11
+        run: pip install onnxruntime pybind11
+
+      - name: Configure & build
+        run: |
+          cmake -S cpp -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j$(nproc)
+
+      - name: Verify module exists
+        run: ls python-backend/app/hadin_core*.so || ls build/*.so
+
+  python-tests:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r python-backend/requirements.txt pytest ruff
+
+      - name: Lint (ruff)
+        run: ruff check python-backend/ || true
+
+      - name: Run tests
+        run: |
+          cd python-backend
+          python -m pytest tests/ -q
+
+  js-lint:
+    name: Lint JavaScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install & lint
+        run: |
+          npm install --no-audit --no-fund
+          node scripts/lint-js.js
