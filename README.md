@@ -75,12 +75,23 @@ flowchart LR
 ### 📱 Android (Termux)
 
 ```bash
+# 1. Pre-built native binaries (never compiled on Android):
+pkg install -y python-numpy python-opencv-python
+
+# 2. Clone and run the one-command setup:
 git clone https://github.com/Al-hassan-961/hadin-combat.git
 cd hadin-combat
 bash scripts/termux_quickstart.sh
 ```
 
-The script installs dependencies, builds the C++ core, and starts the server. It prints:
+> 🔧 **Zero compilation on Android.** `numpy` and OpenCV are installed as
+> Termux's pre-built packages; `setup.py` detects Termux (via `TERMUX_VERSION`,
+> `/data/data/com.termux`, or `sys.platform == 'android'`) and **skips** them
+> in `pip install -e .`, so pip never triggers a C source build (which would
+> fail because Android's Bionic libc lacks `ctanh`). All other dependencies
+> are pure-Python wheels.
+
+The script installs dependencies, starts the server, and prints:
 
 ```
 ✅ Server running at http://<local-ip>:8000 – open this URL in your browser!

@@ -8,10 +8,51 @@
 from __future__ import annotations
 
 import base64
+import glob
+import os
+import sys
 from typing import Dict, List, Optional, Sequence, Tuple
 
-import cv2
 import numpy as np
+
+
+def _load_cv2():
+    """Import OpenCV, falling back to Termux's system site-packages.
+
+    On Termux, OpenCV is installed via `pkg install python-opencv-python` and
+    its Python module is placed under Termux's python site-packages, which is
+    normally already on sys.path. If it is not found (e.g. a venv that hides
+    the system packages), we search the Termux site-packages directories and
+    prepend them before retrying.
+    """
+    try:
+        import cv2  # type: ignore
+
+        return cv2
+    except ImportError:
+        pass
+
+    # Android / Termux: locate the system OpenCV module if it exists on disk.
+    if os.path.isdir("/data/data/com.termux"):
+        termux_site = "/data/data/com.termux/files/usr/lib"
+        for sp in glob.glob(os.path.join(termux_site, "python*/site-packages")):
+            if sp not in sys.path:
+                sys.path.insert(0, sp)
+        try:
+            import cv2  # type: ignore
+
+            return cv2
+        except ImportError:
+            pass
+
+    raise ImportError(
+        "OpenCV (cv2) is required.\n"
+        "  - On Termux (Android):  pkg install python-numpy python-opencv-python\n"
+        "  - On other platforms:   pip install opencv-python-headless"
+    )
+
+
+cv2 = _load_cv2()
 
 # 17-keypoint COCO bone connections used for skeleton drawing.
 COCO_BONES: List[Tuple[int, int]] = [

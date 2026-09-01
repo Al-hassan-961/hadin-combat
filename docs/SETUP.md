@@ -65,22 +65,44 @@ cmake --build build
 
 ## Termux (Android)
 
+> **Zero compilation:** on Termux you must install `numpy` and OpenCV via
+> Termux's pre-built packages (`pkg`) — **never** via `pip`, which would build
+> NumPy from source and fail because Android's Bionic libc lacks `ctanh`.
+
 ```bash
 pkg update -y && pkg upgrade -y
-pkg install -y git python clang cmake opencv onnxruntime
+
+# 1. Pre-built native binaries (numpy + Python OpenCV bindings):
+pkg install -y python-numpy python-opencv-python
+
+# 2. Clone and run the one-command setup:
 git clone https://github.com/Al-hassan-961/hadin-combat.git
 cd hadin-combat
 bash scripts/termux_quickstart.sh
 ```
 
-The script handles venv creation, C++ build, `.env` writing, and server start.
+The script creates a venv, runs `pip install -e .` (whose `setup.py` detects
+Termux and skips numpy/OpenCV so pip never compiles anything), writes `.env`,
+and starts the server.
+
+### Manual alternative
+
+```bash
+pkg install -y python-numpy python-opencv-python
+python -m venv .venv && source .venv/bin/activate
+pip install --upgrade pip
+pip install -e .            # skips numpy + opencv on Termux (setup.py)
+cd python-backend && uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
 
 ---
 
 ## iSH (iOS / Alpine)
 
 ```bash
-apk update && apk add python3 py3-pip cmake make g++
+apk update
+# Pre-built numpy + OpenCV:
+apk add python3 py3-pip py3-numpy py3-opencv cmake make g++
 git clone https://github.com/Al-hassan-961/hadin-combat.git
 cd hadin-combat
 bash scripts/ish_quickstart.sh

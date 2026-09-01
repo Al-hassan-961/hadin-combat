@@ -28,9 +28,11 @@ python3 -m venv .venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
 pip install --upgrade pip
-pip install -r python-backend/requirements.txt
+# setup.py installs numpy + opencv-python-headless on Linux/macOS/Windows and
+# skips them on Android/Termux (where they come from the OS package manager).
+pip install -e .
 pip install pytest ruff black
-pip install -r python-backend/requirements-optional.txt >/dev/null 2>&1 || true
+pip install -e ".[mediapipe]" >/dev/null 2>&1 || true
 ok "Python environment ready."
 
 # ---------- 2. C++ core --------------------------------------------------------

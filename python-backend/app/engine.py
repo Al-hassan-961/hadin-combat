@@ -189,14 +189,14 @@ class MotionPoseEstimator:
     """
 
     def __init__(self, history: int = 240, var_threshold: int = 32) -> None:
-        import cv2
+        from .camera_processor import cv2
 
         self._cv2 = cv2
         self._bg = cv2.createBackgroundSubtractorMOG2(
             history=history, varThreshold=var_threshold, detectShadows=True)
 
     def pose_keypoints(self, frame: Any) -> Optional[List[Dict[str, float]]]:
-        import cv2
+        cv2 = self._cv2
 
         h, w = frame.shape[:2]
         mask = self._bg.apply(frame)

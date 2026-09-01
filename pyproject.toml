@@ -1,0 +1,14 @@
+# ---------------------------------------------------------------------------
+# HADIN-COMBAT – pyproject.toml
+# Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
+# All rights reserved.
+#
+# Build configuration. Dependency resolution (including Android/Termux handling)
+# lives in setup.py so it can make a runtime platform decision; this file only
+# declares the build backend.
+# ---------------------------------------------------------------------------
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# Metadata is defined in setup.py (keep a single source of truth).

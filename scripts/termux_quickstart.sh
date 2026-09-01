@@ -4,8 +4,12 @@
 # Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
 # All rights reserved.
 #
-# One-command setup for Android Termux. Installs dependencies, builds the
-# C++ core (with graceful fallback), writes .env, and starts the server.
+# One-command setup for Android Termux.
+#
+# ZERO-COMPILATION on Android: numpy and OpenCV are installed as Termux's
+# pre-built packages (`pkg install python-numpy python-opencv-python`), and
+# the Python deps are installed via `pip install -e .`, whose setup.py skips
+# numpy/opencv on Termux so pip never triggers a C source build.
 #
 # Usage:  bash scripts/termux_quickstart.sh [repo_url]
 # ---------------------------------------------------------------------------
@@ -45,12 +49,18 @@ info "Step 1/6: Updating Termux packages..."
 pkg update -y >/dev/null 2>&1 || warn "pkg update failed (continuing)"
 pkg upgrade -y >/dev/null 2>&1 || true
 
-# ---------- Step 2: install dependencies ---------------------------------------
-info "Step 2/6: Installing dependencies (clang, cmake, python, opencv, onnxruntime)..."
+# ---------- Step 2: install pre-built system packages --------------------------
+info "Step 2/6: Installing pre-built Termux packages (numpy + OpenCV)..."
+# python-numpy and python-opencv-python provide native binaries so pip never
+# needs to compile C extensions. clang/cmake are only for the optional C++ core.
 pkg install -y \
     git python clang cmake make pkg-config binutils \
-    opencv opencv-headless onnxruntime \
-    >/dev/null 2>&1 || warn "Some packages may have failed to install."
+    python-numpy python-opencv-python \
+    >/dev/null 2>&1 || {
+        warn "Some packages failed. At minimum you need: pkg install python-numpy python-opencv-python"
+        warn "Re-run: pkg install -y python-numpy python-opencv-python"
+    }
+ok "Pre-built native dependencies installed (no C compilation)."
 
 # ---------- Step 3: clone / enter repo ------------------------------------------
 info "Step 3/6: Preparing project directory..."
@@ -67,16 +77,19 @@ python -m venv .venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
 pip install --upgrade pip >/dev/null 2>&1 || true
-pip install -r python-backend/requirements.txt >/dev/null \
-    || { fail "Core dependencies failed to install. Cannot continue."; exit 1; }
-# Optional MediaPipe — improves pose quality, but NOT required (OpenCV fallback works).
-pip install -r python-backend/requirements-optional.txt >/dev/null 2>&1 \
-    || warn "MediaPipe optional install failed – using OpenCV motion fallback."
-pip install pybind11 >/dev/null 2>&1 || true
-ok "Python environment ready."
 
-# ---------- Step 5: build C++ core (graceful) ------------------------------------
-info "Step 5/6: Building C++ core (ONNX Runtime)..."
+# `pip install -e .` uses setup.py, which DETECTS Termux and skips numpy/OpenCV
+# so pip never triggers a source build (which would fail on Bionic's missing ctanh).
+pip install -e . >/dev/null \
+    || { fail "Core dependencies failed to install."; exit 1; }
+
+# Optional MediaPipe – improves pose quality, but NOT required.
+pip install -e ".[mediapipe]" >/dev/null 2>&1 \
+    || warn "MediaPipe optional install failed – using OpenCV motion fallback."
+ok "Python environment ready (zero C compilation)."
+
+# ---------- Step 5: build C++ core (optional, graceful) -------------------------
+info "Step 5/6: Building C++ core (optional accelerator)..."
 BUILD_OK=1
 cmake -S cpp -B build -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1 \
     && cmake --build build -j"$(nproc)" >/dev/null 2>&1 \
@@ -86,7 +99,7 @@ if [ "$BUILD_OK" -eq 1 ] && ls build/*.so* >/dev/null 2>&1; then
     ok "C++ core built successfully (sub-50ms inference)."
     USE_CPP="true"
 else
-    warn "C++ build failed. Falling back to MediaPipe (pure Python)."
+    warn "C++ build skipped/failed – using pure-Python pipeline (MediaPipe/OpenCV)."
     USE_CPP="false"
 fi
 
@@ -108,7 +121,7 @@ echo
 echo -e "${C_BOLD}${C_GREEN}════════════════════════════════════════════════════════════════════${C_RESET}"
 echo -e "${C_GREEN}  🚀 Starting HADIN-COMBAT server...${C_RESET}"
 echo -e "${C_BOLD}${C_GREEN}  ✅ Server running at http://${LOCAL_IP}:8000 – open this URL in your browser!${C_RESET}"
-echo -e "${C_GREEN}  Backend: $([ "$USE_CPP" = "true" ] && echo "C++ ONNX core" || echo "MediaPipe (fallback)")${C_RESET}"
+echo -e "${C_GREEN}  Backend: $([ "$USE_CPP" = "true" ] && echo "C++ ONNX core" || echo "MediaPipe/OpenCV (pure Python)")${C_RESET}"
 echo -e "${C_BOLD}${C_GREEN}════════════════════════════════════════════════════════════════════${C_RESET}"
 echo
 

@@ -4,8 +4,8 @@
 # Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
 # All rights reserved.
 #
-# One-command setup for iOS iSH Shell (Alpine Linux). Uses apk. Falls back to
-# MediaPipe if the C++ build fails.
+# One-command setup for iOS iSH Shell (Alpine Linux). Uses apk for pre-built
+# native binaries (numpy + OpenCV) so pip never compiles C extensions.
 #
 # Usage:  bash scripts/ish_quickstart.sh [repo_url]
 # ---------------------------------------------------------------------------
@@ -28,12 +28,16 @@ PROJECT_DIR="${PROJECT_DIR:-$HOME/hadin-combat}"
 
 echo -e "${C_BOLD}${C_GREEN}🥋 HADIN-COMBAT – iSH (iOS) quickstart${C_RESET}"
 
-# ---------- 1. install deps via apk -------------------------------------------
-info "Step 1/4: Installing packages (apk)..."
+# ---------- 1. install pre-built deps via apk ----------------------------------
+info "Step 1/4: Installing packages via apk (pre-built numpy + OpenCV)..."
 apk update >/dev/null 2>&1 || true
 apk add --no-cache \
     python3 py3-pip git cmake make g++ gcc \
-    >/dev/null 2>&1 || warn "Some packages may have failed."
+    py3-numpy py3-opencv \
+    >/dev/null 2>&1 || {
+        warn "apk install had issues. Ensure: apk add py3-numpy py3-opencv"
+    }
+ok "Pre-built native dependencies installed (no C compilation)."
 
 # ---------- 2. clone -----------------------------------------------------------
 info "Step 2/4: Cloning repository..."
@@ -48,9 +52,14 @@ python3 -m venv .venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
 pip install --upgrade pip >/dev/null 2>&1 || true
-pip install -r python-backend/requirements.txt >/dev/null \
+
+# HADIN_SYSTEM_OPENCV=1 tells setup.py that numpy/OpenCV already come from apk,
+# so pip skips them (no C source build).
+HADIN_SYSTEM_OPENCV=1 pip install -e . >/dev/null \
     || { fail "Core dependencies failed to install. Cannot continue."; exit 1; }
-pip install -r python-backend/requirements-optional.txt >/dev/null 2>&1 \
+
+# Optional MediaPipe.
+HADIN_SYSTEM_OPENCV=1 pip install -e ".[mediapipe]" >/dev/null 2>&1 \
     || warn "MediaPipe optional install failed – using OpenCV motion fallback."
 
 BUILD_OK=1
@@ -60,7 +69,7 @@ cmake -S cpp -B build -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1 \
 
 USE_CPP="true"
 if [ "$BUILD_OK" -ne 1 ] || ! ls build/*.so* >/dev/null 2>&1; then
-    warn "C++ build failed. Falling back to MediaPipe."
+    warn "C++ build skipped/failed. Using pure-Python pipeline."
     USE_CPP="false"
 fi
 

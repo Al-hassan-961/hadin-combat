@@ -1,14 +1,33 @@
 # ---------------------------------------------------------------------------
-# HADIN-COMBAT – Python backend dependencies (core – always required)
+# HADIN-COMBAT – Python backend dependencies
 # Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
+# All rights reserved.
+#
+# NOTE FOR ANDROID / TERMUX USERS:
+#   Do NOT rely on this file on Termux. pip must never build C extensions
+#   there (NumPy's source build fails because Android's Bionic libc lacks
+#   `ctanh`). Instead install Termux's pre-built binaries and use setup.py:
+#
+#       pkg install python-numpy python-opencv-python
+#       pip install -e .
+#
+#   The `; sys_platform != 'android'` markers below exclude numpy/OpenCV on
+#   Termux as a safety net. On Linux/macOS/Windows this file installs the
+#   normal pre-built wheels. All remaining deps are pure-Python wheels (no
+#   C source builds).
 # ---------------------------------------------------------------------------
 fastapi==0.111.0
-uvicorn[standard]==0.30.1
-opencv-python-headless==4.10.0.84
-numpy==1.26.4
+# Plain uvicorn (no [standard] extras) to avoid compiling uvloop/httptools.
+uvicorn==0.30.1
+# numpy and OpenCV install from wheels on non-Android platforms. On Termux
+# they come from `pkg` (pre-built), so they are excluded here.
+numpy>=1.24 ; sys_platform != 'android'
+opencv-python-headless>=4.8 ; sys_platform != 'android'
+websockets==12.0
 pybind11==2.12.0
 python-dotenv==1.0.1
-websockets==12.0
-pillow==10.3.0
 redis==5.0.4
 python-multipart==0.0.9
+
+# Optional (not required): improves pose quality when MediaPipe is available.
+# mediapipe==0.10.14

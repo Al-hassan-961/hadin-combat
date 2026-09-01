@@ -45,7 +45,9 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r python-backend/requirements.txt pytest ruff
+        run: |
+          pip install -e .
+          pip install -e ".[dev]"
 
       - name: Lint (ruff)
         run: ruff check python-backend/ || true
