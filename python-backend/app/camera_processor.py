@@ -48,8 +48,18 @@ def _load_cv2():
     raise ImportError(
         "OpenCV (cv2) is required.\n"
         "  - On Termux (Android):  pkg install python-numpy python-opencv-python\n"
-        "  - On other platforms:   pip install opencv-python-headless"
+        "  - On other platforms:   pip install opencv-python"
     )
+
+
+def cv2_info() -> Dict[str, str]:
+    """Report the active OpenCV provider + version (system vs pip)."""
+    version = getattr(cv2, "__version__", "?")
+    if os.path.isdir("/data/data/com.termux"):
+        provider = "termux-system (pkg install python-opencv-python)"
+    else:
+        provider = "pip"
+    return {"provider": provider, "version": version}
 
 
 cv2 = _load_cv2()

@@ -5,8 +5,8 @@
 #
 # Fallback for constrained installs. IMPORTANT: a constraints file can only
 # PIN the version of a package that is otherwise requested — it CANNOT remove
-# a dependency the project lists. To stop pip resolving opencv-python-headless
-# you must (a) use `pip install -e .` (setup.py skips it on Termux), or
+# a dependency the project lists. To stop pip resolving the OpenCV binding you
+# must (a) use `pip install -e .` (setup.py skips it on Termux), or
 # (b) install with `--no-deps` and add the pure deps yourself (see below).
 #
 # Usage (Termux):
@@ -20,7 +20,7 @@
 # OpenCV is provided by Termux (pkg install python-opencv-python) and must
 # NEVER be built from source on Android. If a dependency still requests it,
 # install with --no-deps (below) rather than allowing a source build.
-# opencv-python-headless==0 ; sys_platform != 'android'
+# opencv-python==0 ; sys_platform != 'android'
 
 fastapi==0.111.0
 uvicorn==0.30.1

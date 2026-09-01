@@ -20,9 +20,11 @@ fastapi==0.111.0
 # Plain uvicorn (no [standard] extras) to avoid compiling uvloop/httptools.
 uvicorn==0.30.1
 # numpy and OpenCV install from wheels on non-Android platforms. On Termux
-# they come from `pkg` (pre-built), so they are excluded here.
+# they come from `pkg` (pre-built):  pkg install python-numpy python-opencv-python
 numpy>=1.24 ; sys_platform != 'android'
-opencv-python-headless>=4.8 ; sys_platform != 'android'
+# Standard `opencv-python` binding (not headless) — the more complete and
+# better-supported choice on desktops; Android uses the system package.
+opencv-python>=4.8 ; sys_platform != 'android'
 websockets==12.0
 pybind11==2.12.0
 python-dotenv==1.0.1

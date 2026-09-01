@@ -28,7 +28,7 @@ python3 -m venv .venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
 pip install --upgrade pip
-# setup.py installs numpy + opencv-python-headless on Linux/macOS/Windows and
+# setup.py installs numpy + opencv-python on Linux/macOS/Windows and
 # skips them on Android/Termux (where they come from the OS package manager).
 pip install -e .
 pip install pytest ruff black

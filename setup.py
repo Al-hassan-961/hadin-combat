@@ -48,7 +48,6 @@ def native_from_os_packages() -> bool:
 # binaries) rather than a pip source build.
 HEAVY_TERMUX_PACKAGES = {
     "numpy": "python-numpy",
-    "opencv-python-headless": "python-opencv-python",
     "opencv-python": "python-opencv-python",
     "scipy": "python-scipy",
     "matplotlib": "python-matplotlib",
@@ -79,8 +78,10 @@ def install_requires() -> list:
         return reqs
 
     # Non-Android (Linux/macOS/Windows): install wheels from pip.
+    # `opencv-python` (the standard binding) rather than opencv-python-headless,
+    # since the app benefits from the full binding and it has broad wheel support.
     reqs.append("numpy>=1.24")
-    reqs.append("opencv-python-headless>=4.8")
+    reqs.append("opencv-python>=4.8")
     return reqs
 
 
@@ -97,8 +98,7 @@ def _warn_heavy_packages() -> None:
     missing = []
     for mod, pkg in HEAVY_TERMUX_PACKAGES.items():
         try:
-            __import__(mod.replace("opencv-python-headless", "cv2")
-                         .replace("opencv-python", "cv2"))
+            __import__(mod.replace("opencv-python", "cv2"))
         except ImportError:
             missing.append(f"  - {mod:24} -> pkg install {pkg}")
     if missing:

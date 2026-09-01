@@ -32,6 +32,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .camera_processor import (
+    cv2_info,
     decode_jpeg_frame,
     draw_opponent,
     draw_skeleton,
@@ -425,6 +426,7 @@ async def api_health() -> JSONResponse:
         "name": "hadin-combat",
         "version": __version__,
         "backend": ai_core.backend,
+        "opencv": cv2_info(),
         "uptime_s": round(time.time() - _START_TIME, 1),
     })
 
