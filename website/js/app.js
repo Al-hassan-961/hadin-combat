@@ -51,6 +51,35 @@
     let tipLastShown = 0;
     let tipCurrent = '';
 
+    // ---- Stored preferences (from the Settings page) ----------------------
+    function applyStoredPrefs() {
+        try {
+            if (localStorage.getItem('hc.voice') === '1') voiceOn = true;
+            if (localStorage.getItem('hc.mirror') === '1') mirrorView = true;
+            if (localStorage.getItem('hc.skeleton') === '0') showSkeleton = false;
+            if (localStorage.getItem('hc.ghost') === '1') showOpponent = true;
+        } catch (_) { /* private mode etc. */ }
+    }
+    applyStoredPrefs();
+
+    // ---- Product UI helpers --------------------------------------------------
+    function toast(text, icon) {
+        const stack = document.getElementById('toastStack');
+        if (!stack) return;
+        const t = document.createElement('div');
+        t.className = 'toast';
+        t.innerHTML = '<span class="t-ic">' + (icon || '💡') + '</span><span>' + text + '</span>';
+        stack.appendChild(t);
+        setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 350); }, 3200);
+    }
+
+    function applyTheme() {
+        const light = localStorage.getItem('hc.theme') === 'light';
+        document.documentElement.classList.toggle('light', light);
+        const b = document.getElementById('themeToggle');
+        if (b) b.textContent = light ? '☀️' : '🌙';
+    }
+
     // ---- Text-to-speech voice coaching (Web Speech API) -------------------
     function speak(text) {
         if (!voiceOn || !('speechSynthesis' in window)) return;
@@ -116,6 +145,7 @@
         }
         if (msg.type === 'profile_ack') {
             addFeedback('Sparring profile: ' + (msg.profile || '') + '.');
+            toast('Sparring profile: ' + (msg.profile || '').replace(/_/g, ' '), '🤖');
         }
         if (msg.type === 'match_summary') {
             showMatchSummary(msg);
@@ -554,6 +584,13 @@
         g('sumLanded').textContent = s.landed || 0;
         g('sumAccuracy').textContent = (s.accuracy_pct || 0) + '%';
         g('sumPerformance').textContent = s.performance || 0;
+        // Animated circular performance ring (Circumference = 2*pi*64 ≈ 402.1).
+        const ring = document.getElementById('perfRingFg');
+        if (ring) {
+            const C = 402.1;
+            ring.style.strokeDashoffset = C - (C * Math.min(100, s.performance || 0)) / 100;
+        }
+        toast('Match summary ready — great session!', '🏆');
         g('sumMost').textContent = 'Most used: ' + ((s.most_used || 'none').replace(/_/g, ' '));
         g('sumReaction').textContent = 'Reaction: ' + (s.reaction_s || 0).toFixed(2) + 's';
         g('sumFatigue').textContent = 'Final fatigue: ' + (s.final_fatigue || 0);
@@ -717,8 +754,58 @@
     // ---- Init -----------------------------------------------------------------
     setupConnectBar();
     applyViewTransforms();
+    applyTheme();
     pollHealth();
     setInterval(pollHealth, 10000);
+
+    // Theme toggle (persisted).
+    const themeToggle = document.getElementById('themeToggle');
+    if (themeToggle) {
+        themeToggle.addEventListener('click', () => {
+            localStorage.setItem('hc.theme',
+                document.documentElement.classList.contains('light') ? 'dark' : 'light');
+            applyTheme();
+        });
+    }
+
+    // Hero "Start Training" CTA — jumps to the lab and starts the session
+    // inside the same user gesture (camera permission requirements).
+    const startCta = document.getElementById('startCta');
+    if (startCta) {
+        startCta.addEventListener('click', () => {
+            const lab = document.getElementById('training');
+            if (lab) lab.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            const start = document.getElementById('startBtn');
+            if (start) start.click();
+        });
+    }
+
+    // Offline detection banner.
+    const offlineBanner = document.getElementById('offlineBanner');
+    function setOffline(off) {
+        if (offlineBanner) offlineBanner.classList.toggle('show', off);
+    }
+    window.addEventListener('online', () => setOffline(false));
+    window.addEventListener('offline', () => setOffline(true));
+    setOffline(!navigator.onLine);
+
+    // Animated hero counters (requestAnimationFrame easing).
+    function animateCounters() {
+        document.querySelectorAll('[data-count]').forEach((el) => {
+            const target = parseInt(el.dataset.count, 10);
+            const suffix = el.dataset.suffix || '';
+            const dur = 1200;
+            const t0 = performance.now();
+            function frame(t) {
+                const p = Math.min(1, (t - t0) / dur);
+                const eased = 1 - Math.pow(1 - p, 3);
+                el.textContent = Math.round(target * eased) + suffix;
+                if (p < 1) requestAnimationFrame(frame);
+            }
+            requestAnimationFrame(frame);
+        });
+    }
+    animateCounters();
 
     // Warn up-front if the camera will be blocked by browser policy (plain
     // http on a non-localhost address).

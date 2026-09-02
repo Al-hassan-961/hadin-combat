@@ -1,171 +1,210 @@
 <!DOCTYPE html>
 <!--
- * HADIN-COMBAT – index.html
+ * HADIN-COMBAT – index.html (landing + live training)
  * Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
  * All rights reserved.
 -->
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport"
-          content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#0a0a12" />
-    <title>HADIN-COMBAT · The AI Opponent That Learns Your Fighting DNA</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0e27" />
+    <meta name="description" content="HADIN-COMBAT — the AI opponent that learns your fighting DNA. Real-time strike detection, fatigue analytics and a professional AI coach." />
+    <title>HADIN-COMBAT · AI Martial-Arts Coach</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="css/style.css" />
+    <link rel="stylesheet" href="css/theme.css" />
 </head>
 <body>
-    <header class="app-header">
-        <div class="brand">
-            <span class="brand-mark">🥋</span>
-            <div class="brand-text">
+    <!-- Offline banner -->
+    <div class="offline-banner" id="offlineBanner" role="status">📡 You are offline — live camera training needs a connection to the server.</div>
+
+    <!-- Toast stack for coaching tips / notifications -->
+    <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
+    <!-- ================= NAVIGATION ================= -->
+    <header class="topnav" role="banner">
+        <a class="brand" href="/" aria-label="HADIN-COMBAT home">
+            <span class="brand-mark" aria-hidden="true">🥋</span>
+            <span class="brand-text">
                 <h1>HADIN<span class="accent">-COMBAT</span></h1>
-                <p class="tagline">The AI opponent that learns your fighting DNA</p>
-            </div>
+            </span>
+        </a>
+
+        <nav class="nav-links" aria-label="Primary">
+            <a class="nav-link active" href="#training"><span>🥊</span> Training</a>
+            <a class="nav-link" href="/dashboard.html"><span>📈</span> Dashboard</a>
+            <a class="nav-link" href="/settings.html"><span>⚙️</span> Settings</a>
+        </nav>
+
+        <div class="brand" style="margin-right:0">
+            <span class="backend-pill" id="backendPill" role="status">connecting…</span>
+            <button class="icon-btn" id="themeToggle" title="Toggle theme" aria-label="Toggle dark/light theme">🌙</button>
+            <a class="icon-btn" href="/settings.html" title="Profile &amp; settings" aria-label="Open profile settings">👤</a>
         </div>
-        <div class="backend-pill" id="backendPill">connecting…</div>
     </header>
 
-    <!-- Connection / share bar -->
-    <div class="connect-bar" id="connectBar">
-        <span class="connect-label">🔗 Server</span>
-        <code class="connect-url" id="connectUrl">—</code>
-        <button class="connect-copy" id="copyUrl" title="Copy URL" aria-label="Copy URL">📋</button>
-        <span class="connect-note" id="connectNote">open this on any device on your network</span>
-    </div>
+    <!-- ================= HERO / LANDING ================= -->
+    <main id="main">
+        <section class="hero" aria-label="Welcome">
+            <div class="hero-eyebrow">⚡ Next-generation martial-arts intelligence</div>
+            <h1 class="hero-title">The AI opponent that learns your <span class="grad">fighting DNA</span></h1>
+            <p class="hero-sub">
+                Real-time strike detection with confidence scores, a 0–100 fatigue engine,
+                adaptive sparring profiles and a professional AI coach — right from your phone's browser.
+            </p>
+            <button class="hero-cta" id="startCta">▶ Start Training</button>
 
-    <main class="stage-wrap">
-        <!-- Camera stage -->
-        <section class="stage" id="stage">
-            <video id="camera" playsinline muted autoplay></video>
-            <canvas id="overlay"></canvas>
-
-            <div class="stage-message" id="stageMessage">
-                <div class="msg-box">
-                    <span class="msg-emoji">🎯</span>
-                    <p>Enable your camera to begin your session.</p>
-                </div>
+            <div class="hero-stats">
+                <div class="hero-stat"><div class="num" data-count="50" data-suffix="ms">0ms</div><div class="lbl">Target latency</div></div>
+                <div class="hero-stat"><div class="num" data-count="10" data-suffix="+">0+</div><div class="lbl">Techniques</div></div>
+                <div class="hero-stat"><div class="num" data-count="5">0</div><div class="lbl">Sparring styles</div></div>
+                <div class="hero-stat"><div class="num" data-count="100">0</div><div class="lbl">Fatigue scale</div></div>
             </div>
-
-            <div class="hud hud-top-left" id="hudFps">— fps</div>
-            <div class="hud hud-top-right" id="hudLatency">— ms</div>
-            <div class="hud hud-difficulty" id="hudDifficulty">Difficulty: 40%</div>
         </section>
 
-        <!-- LIVE ANALYSIS PANEL (below the camera feed) -->
-        <section class="panel live-panel" id="livePanel">
-            <div class="live-row">
-                <div class="live-cell">
-                    <span class="live-label">Strike</span>
-                    <span class="live-big" id="liveStrike">—</span>
-                    <span class="live-sub" id="liveStrikeConf"></span>
-                </div>
-                <div class="live-cell">
-                    <span class="live-label">Fatigue</span>
-                    <span class="live-big" id="liveFatigue">0</span>
-                    <div class="quality-bar"><div class="quality-fill" id="liveFatigueFill" style="width:0%"></div></div>
-                </div>
-                <div class="live-cell">
-                    <span class="live-label">Opponent</span>
-                    <span class="live-big" id="liveProfile">Balanced</span>
-                </div>
-            </div>
-            <div class="live-row">
-                <div class="live-cell">
-                    <span class="live-label">Round</span>
-                    <span class="live-big" id="liveRound">R1</span>
-                    <span class="live-sub" id="liveRoundTime">0:00</span>
-                </div>
-                <div class="live-cell">
-                    <span class="live-label">Duration</span>
-                    <span class="live-big" id="liveDuration">0:00</span>
-                </div>
-                <div class="live-cell">
-                    <span class="live-label">Speed</span>
-                    <span class="live-big" id="liveSpeed">slow</span>
-                </div>
-            </div>
-            <div class="live-action" id="liveAction">Press Start to begin your session.</div>
-            <div class="live-tip" id="liveTip">Your AI coach is warming up…</div>
-        </section>
+        <!-- ================= LIVE TRAINING ================= -->
+        <section id="training" class="page-pad" aria-label="Live training">
+            <div class="section-title">Live Training <span class="rule"></span></div>
 
-        <!-- Feedback panel -->
-        <section class="feedback" id="feedbackPanel">
-            <div class="feedback-head">
-                <h2>🥊 AI Coach</h2>
-                <span class="grade" id="grade">C</span>
-            </div>
+            <div class="stage-wrap">
+                <!-- Camera stage -->
+                <section class="stage" id="stage" aria-label="Camera feed">
+                    <video id="camera" playsinline muted autoplay></video>
+                    <canvas id="overlay" aria-hidden="true"></canvas>
 
-            <!-- Fatigue meter + sparring profile -->
-            <div class="fatigue-row">
-                <span class="fatigue-label">😮‍💨 Fatigue</span>
-                <div class="fatigue-bar"><div class="fatigue-fill" id="fatigueFill" style="width:0%"></div></div>
-                <span class="fatigue-val" id="fatigueVal">0</span>
-                <span class="fatigue-level" id="fatigueLevel">fresh</span>
-            </div>
-            <div class="profile-row">
-                <span class="fatigue-label">🤖 Sparring</span>
-                <div class="profile-chips" id="profileChips"></div>
-            </div>
+                    <div class="stage-message" id="stageMessage" role="status">
+                        <div class="msg-box">
+                            <span class="msg-emoji">🎯</span>
+                            <p class="msg-title">Ready when you are</p>
+                            <p>Press Start and your AI coach watches every move.</p>
+                        </div>
+                    </div>
 
-            <!-- Detected technique + quality -->
-            <div class="coach-move" id="coachMove">
-                <span class="coach-move-name" id="moveName">—</span>
-                <span class="coach-move-side" id="moveSide"></span>
-                <span class="coach-move-q" id="moveQ"></span>
-                <div class="quality-bar"><div class="quality-fill" id="qualityFill" style="width:0%"></div></div>
+                    <div class="hud hud-top-left" id="hudFps">— fps</div>
+                    <div class="hud hud-top-right" id="hudLatency">— ms</div>
+                    <div class="hud hud-difficulty" id="hudDifficulty">Difficulty: 40%</div>
+                </section>
+
+                <!-- LIVE ANALYSIS PANEL -->
+                <section class="panel live-panel" aria-label="Live analysis">
+                    <div class="live-row">
+                        <div class="live-cell"><span class="live-label">Strike</span>
+                            <span class="live-big" id="liveStrike">—</span>
+                            <span class="live-sub" id="liveStrikeConf"></span></div>
+                        <div class="live-cell"><span class="live-label">Fatigue</span>
+                            <span class="live-big" id="liveFatigue">0</span>
+                            <div class="quality-bar"><div class="quality-fill" id="liveFatigueFill" style="width:0%"></div></div></div>
+                        <div class="live-cell"><span class="live-label">Opponent</span>
+                            <span class="live-big" id="liveProfile">Balanced</span></div>
+                    </div>
+                    <div class="live-row">
+                        <div class="live-cell"><span class="live-label">Round</span>
+                            <span class="live-big" id="liveRound">R1</span>
+                            <span class="live-sub" id="liveRoundTime">0:00</span></div>
+                        <div class="live-cell"><span class="live-label">Duration</span>
+                            <span class="live-big" id="liveDuration">0:00</span></div>
+                        <div class="live-cell"><span class="live-label">Speed</span>
+                            <span class="live-big" id="liveSpeed">slow</span></div>
+                    </div>
+                    <div class="live-action" id="liveAction">Press Start to begin your session.</div>
+                    <div class="live-tip" id="liveTip">Your AI coach is warming up…</div>
+                </section>
+
+                <!-- COACH PANEL -->
+                <section class="feedback" id="feedbackPanel" aria-label="AI coach">
+                    <div class="feedback-head">
+                        <h2>🥊 AI Coach</h2>
+                        <span class="grade" id="grade">C</span>
+                    </div>
+
+                    <div class="fatigue-row">
+                        <span class="fatigue-label">😮‍💨 Fatigue</span>
+                        <div class="fatigue-bar"><div class="fatigue-fill" id="fatigueFill" style="width:0%"></div></div>
+                        <span class="fatigue-val" id="fatigueVal">0</span>
+                        <span class="fatigue-level" id="fatigueLevel">fresh</span>
+                    </div>
+                    <div class="profile-row">
+                        <span class="fatigue-label">🤖 Sparring</span>
+                        <div class="profile-chips" id="profileChips"></div>
+                    </div>
+
+                    <div class="coach-move" id="coachMove">
+                        <span class="coach-move-name" id="moveName">—</span>
+                        <span class="coach-move-side" id="moveSide"></span>
+                        <span class="coach-move-q" id="moveQ"></span>
+                        <div class="quality-bar"><div class="quality-fill" id="qualityFill" style="width:0%"></div></div>
+                    </div>
+                    <div class="coach-counts" id="coachCounts"></div>
+                    <ul class="feedback-list" id="feedbackList"></ul>
+                </section>
+
+                <!-- Controls -->
+                <nav class="controls" aria-label="Session controls">
+                    <button id="startBtn" class="btn btn-primary">▶ Start</button>
+                    <button id="resetBtn" class="btn btn-ghost">↺ Reset</button>
+                    <a href="/dashboard.html" class="btn btn-ghost">📈 Dashboard</a>
+                </nav>
+                <!-- View toggles -->
+                <nav class="controls controls-toggles" aria-label="Overlay toggles">
+                    <button id="skeletonBtn" class="btn btn-ghost btn-active">🦴 Skeleton</button>
+                    <button id="ghostBtn" class="btn btn-ghost">👻 Ghost</button>
+                    <button id="mirrorBtn" class="btn btn-ghost">🪞 Mirror</button>
+                    <button id="voiceBtn" class="btn btn-ghost">🔊 Voice</button>
+                </nav>
+
+                <!-- Connection / share bar -->
+                <div class="connect-bar" role="contentinfo">
+                    <span class="connect-label">🔗 Server</span>
+                    <code class="connect-url" id="connectUrl">—</code>
+                    <button class="connect-copy" id="copyUrl" title="Copy URL" aria-label="Copy URL">📋</button>
+                    <span class="connect-note">open this on any device on your network</span>
+                </div>
             </div>
-
-            <!-- Technique counters -->
-            <div class="coach-counts" id="coachCounts"></div>
-
-            <!-- Coaching advice -->
-            <ul class="feedback-list" id="feedbackList">
-                <li>Press Start and train — your AI coach watches every move.</li>
-            </ul>
         </section>
     </main>
 
-    <!-- Controls -->
-    <nav class="controls">
-        <button id="startBtn" class="btn btn-primary">▶ Start</button>
-        <button id="resetBtn" class="btn btn-ghost">↺ Reset</button>
-        <a href="/dashboard.html" class="btn btn-ghost">📈 Dashboard</a>
-    </nav>
-    <!-- View toggles -->
-    <nav class="controls controls-toggles">
-        <button id="skeletonBtn" class="btn btn-ghost btn-active">🦴 Skeleton</button>
-        <button id="ghostBtn" class="btn btn-ghost">👻 Ghost</button>
-        <button id="mirrorBtn" class="btn btn-ghost">🪞 Mirror</button>
-        <button id="voiceBtn" class="btn btn-ghost">🔊 Voice</button>
-    </nav>
-
+    <!-- ================= FOOTER ================= -->
     <footer class="app-footer">
-        <p>
-            HADIN = <strong>HA</strong>ssan + <strong>DIN</strong>a — human skill fused with machine intelligence.
-        </p>
-        <p class="creators">
-            © 2026 <a href="https://github.com/Al-hassan-961">Al-hassan Shehade</a>
-            &amp; <a href="https://github.com/">Dina Balcheh</a>
-        </p>
+        <p>HADIN = <strong>HA</strong>ssan + <strong>DIN</strong>a — human skill fused with machine intelligence.</p>
+        <p class="creators">© 2026 <a href="https://github.com/Al-hassan-961">Al-hassan Shehade</a> &amp; <a href="https://github.com/">Dina Balcheh</a> · MIT License</p>
     </footer>
 
-    <!-- Match summary modal (closed by default; .open toggled from app.js) -->
-    <div class="modal-mask" id="summaryMask" aria-hidden="true">
+    <!-- ================= MATCH SUMMARY MODAL ================= -->
+    <div class="modal-mask" id="summaryMask" role="dialog" aria-modal="true" aria-hidden="true">
         <div class="modal">
             <div class="feedback-head">
                 <h2>🏆 Match Summary</h2>
-                <button class="modal-close" id="summaryClose" aria-label="Close">✕</button>
+                <button class="modal-close" id="summaryClose" aria-label="Close summary">✕</button>
             </div>
+
+            <div class="ring-wrap" aria-hidden="true">
+                <svg class="ring" id="perfRing" width="150" height="150" viewBox="0 0 150 150">
+                    <defs>
+                        <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0" stop-color="#00d4ff"/><stop offset="1" stop-color="#7c3aed"/>
+                        </linearGradient>
+                    </defs>
+                    <circle class="ring-bg" cx="75" cy="75" r="64" fill="none" stroke-width="12"/>
+                    <circle class="ring-fg" id="perfRingFg" cx="75" cy="75" r="64" fill="none"
+                            stroke-width="12" stroke-dasharray="402.1" stroke-dashoffset="402.1"/>
+                </svg>
+                <div class="ring-center" id="sumPerformance">0</div>
+                <div class="ring-label">Performance</div>
+            </div>
+
             <div class="cards">
                 <div class="card"><div class="card-num" id="sumStrikes">0</div><div class="card-label">Strikes</div></div>
                 <div class="card"><div class="card-num" id="sumLanded">0</div><div class="card-label">Landed</div></div>
                 <div class="card"><div class="card-num" id="sumAccuracy">0%</div><div class="card-label">Accuracy</div></div>
-                <div class="card"><div class="card-num" id="sumPerformance">0</div><div class="card-label">Performance</div></div>
+                <div class="card"><div class="card-num" id="sumFatigue">0</div><div class="card-label">Final fatigue</div></div>
             </div>
             <div class="sum-stats">
                 <span id="sumMost">Most used: —</span>
                 <span id="sumReaction">Reaction: —</span>
-                <span id="sumFatigue">Fatigue: —</span>
                 <span id="sumTime">Duration: —</span>
             </div>
             <h3 class="sum-head">💡 Improvement suggestions</h3>

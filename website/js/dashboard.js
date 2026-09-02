@@ -306,4 +306,38 @@
         bind(document.getElementById('summaryClose'));
         bind(document.getElementById('summaryOk'));
     });
+
+    // ---- Product UI helpers -----------------------------------------------------
+    function toast(text, icon) {
+        const stack = document.getElementById('toastStack');
+        if (!stack) return;
+        const t = document.createElement('div');
+        t.className = 'toast';
+        t.innerHTML = '<span class="t-ic">' + (icon || '💡') + '</span><span>' + text + '</span>';
+        stack.appendChild(t);
+        setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 350); }, 3200);
+    }
+    function applyTheme() {
+        const light = localStorage.getItem('hc.theme') === 'light';
+        document.documentElement.classList.toggle('light', light);
+        const b = document.getElementById('themeToggle');
+        if (b) b.textContent = light ? '☀️' : '🌙';
+    }
+    function setOffline(off) {
+        const banner = document.getElementById('offlineBanner');
+        if (banner) banner.classList.toggle('show', off);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        applyTheme();
+        setOffline(!navigator.onLine);
+        window.addEventListener('online', () => setOffline(false));
+        window.addEventListener('offline', () => setOffline(true));
+        const toggle = document.getElementById('themeToggle');
+        if (toggle) toggle.addEventListener('click', () => {
+            localStorage.setItem('hc.theme',
+                document.documentElement.classList.contains('light') ? 'dark' : 'light');
+            applyTheme();
+        });
+    });
 })();

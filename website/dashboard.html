@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
- * HADIN-COMBAT – dashboard.html
+ * HADIN-COMBAT – dashboard.html (performance analytics)
  * Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
  * All rights reserved.
 -->
@@ -8,88 +8,80 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#0a0a12" />
+    <meta name="theme-color" content="#0a0e27" />
+    <meta name="description" content="HADIN-COMBAT performance dashboard — technique accuracy, fatigue trends, video analysis and session history." />
     <title>HADIN-COMBAT · Performance Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="css/style.css" />
+    <link rel="stylesheet" href="css/theme.css" />
 </head>
 <body>
-    <header class="app-header">
-        <div class="brand">
-            <span class="brand-mark">🥋</span>
-            <div class="brand-text">
-                <h1>HADIN<span class="accent">-COMBAT</span></h1>
-                <p class="tagline">Performance Dashboard</p>
-            </div>
+    <div class="offline-banner" id="offlineBanner" role="status">📡 Offline — dashboard data may be stale.</div>
+    <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
+    <header class="topnav" role="banner">
+        <a class="brand" href="/" aria-label="HADIN-COMBAT home">
+            <span class="brand-mark" aria-hidden="true">🥋</span>
+            <span class="brand-text"><h1>HADIN<span class="accent">-COMBAT</span></h1></span>
+        </a>
+        <nav class="nav-links" aria-label="Primary">
+            <a class="nav-link" href="/"><span>🥊</span> Training</a>
+            <a class="nav-link active" href="/dashboard.html"><span>📈</span> Dashboard</a>
+            <a class="nav-link" href="/settings.html"><span>⚙️</span> Settings</a>
+        </nav>
+        <div class="brand" style="margin-right:0">
+            <button class="icon-btn" id="themeToggle" title="Toggle theme" aria-label="Toggle dark/light theme">🌙</button>
+            <a class="icon-btn" href="/settings.html" title="Profile" aria-label="Open profile settings">👤</a>
         </div>
-        <a class="backend-pill" href="/" style="text-decoration:none">⬅ Back to training</a>
     </header>
 
-    <main class="stage-wrap">
+    <main class="page-pad" id="main">
+        <section class="hero" style="padding-top:36px;padding-bottom:24px" aria-label="Dashboard overview">
+            <div class="hero-eyebrow">📊 Analytics suite</div>
+            <h1 class="hero-title" style="font-size:clamp(1.7rem,4vw,2.6rem)">Performance <span class="grad">Dashboard</span></h1>
+            <p class="hero-sub">Strike accuracy, movement efficiency, fatigue progression and video analysis — all in one place.</p>
+        </section>
+
         <!-- Summary cards -->
-        <section class="cards">
+        <section class="cards" aria-label="Totals">
             <div class="card"><div class="card-num" id="statSessions">0</div><div class="card-label">Sessions</div></div>
             <div class="card"><div class="card-num" id="statStrikes">0</div><div class="card-label">Strikes</div></div>
             <div class="card"><div class="card-num" id="statTime">0</div><div class="card-label">Min trained</div></div>
             <div class="card"><div class="card-num" id="statFatigue">0</div><div class="card-label">Avg fatigue</div></div>
         </section>
 
-        <!-- Charts -->
-        <section class="panel">
-            <h2>📊 Techniques thrown</h2>
-            <canvas id="chartTechniques" width="340" height="200"></canvas>
-        </section>
+        <div class="grid-2">
+            <section class="panel"><h2>📊 Techniques thrown</h2><canvas id="chartTechniques" width="340" height="200"></canvas></section>
+            <section class="panel"><h2>📉 Session fatigue trend</h2><canvas id="chartFatigue" width="340" height="180"></canvas></section>
+            <section class="panel"><h2>🤖 Sparring profiles used</h2><canvas id="chartProfiles" width="340" height="160"></canvas></section>
+            <section class="panel"><h2>🎯 Strike accuracy</h2><canvas id="chartAccuracy" width="340" height="180"></canvas></section>
+        </div>
 
-        <section class="panel">
-            <h2>📉 Session fatigue trend</h2>
-            <canvas id="chartFatigue" width="340" height="180"></canvas>
-        </section>
-
-        <section class="panel">
-            <h2>🤖 Sparring profiles used</h2>
-            <canvas id="chartProfiles" width="340" height="160"></canvas>
-        </section>
-
-        <!-- Strike accuracy trend (avg technique quality per session) -->
-        <section class="panel">
-            <h2>🎯 Strike accuracy</h2>
-            <canvas id="chartAccuracy" width="340" height="180"></canvas>
-        </section>
-
-        <!-- Movement efficiency + reaction time trend -->
         <section class="panel">
             <h2>⚡ Efficiency &amp; reaction</h2>
             <div class="mini-row">
-                <div class="mini-box">
-                    <div class="card-num" id="statSpm">0</div>
-                    <div class="card-label">Avg strikes/min</div>
-                </div>
-                <div class="mini-box">
-                    <div class="card-num" id="statReaction">0.0s</div>
-                    <div class="card-label">Avg reaction</div>
-                </div>
+                <div class="mini-box"><div class="card-num" id="statSpm">0</div><div class="card-label">Avg strikes/min</div></div>
+                <div class="mini-box"><div class="card-num" id="statReaction">0.0s</div><div class="card-label">Avg reaction</div></div>
             </div>
             <canvas id="chartEffReaction" width="340" height="160"></canvas>
         </section>
 
-        <!-- Improvement suggestions -->
         <section class="panel">
             <h2>💡 Personalised improvement</h2>
-            <ul class="feedback-list" id="improvementList"></ul>
+            <ul class="feedback-list" id="improvementList"><li class="skel" style="height:18px;width:90%"></li></ul>
         </section>
 
-        <!-- Video upload & analysis -->
         <section class="panel">
             <h2>🎬 Upload &amp; analyse a sparring video</h2>
             <p class="card-label" style="margin-bottom:8px">MP4 · MOV · AVI — analysed offline with the same AI coach.</p>
-            <input type="file" id="videoFile" accept="video/mp4,video/quicktime,video/x-msvideo,video/*" class="file-input" />
-            <div class="progress-track" id="videoProgressTrack" hidden>
-                <div class="progress-fill" id="videoProgressFill" style="width:0%"></div>
-                <span class="progress-pct" id="videoProgressPct">0%</span>
-            </div>
+            <input type="file" id="videoFile" accept="video/mp4,video/quicktime,video/x-msvideo,video/*" class="file-input" aria-label="Upload video" />
+            <div class="progress-track" id="videoProgressTrack" hidden><div class="progress-fill" id="videoProgressFill" style="width:0%"></div><span class="progress-pct" id="videoProgressPct">0%</span></div>
             <div class="card-label" id="videoStatus">Choose a video to start.</div>
-            <div id="videoError" class="live-tip" style="color:var(--accent)"></div>
+            <div id="videoError" class="live-tip" style="color:var(--rose)"></div>
 
-            <!-- Video analysis result (shown when done) -->
             <div id="videoResult" hidden>
                 <div class="cards">
                     <div class="card"><div class="card-num" id="vidStrikes">0</div><div class="card-label">Strikes</div></div>
@@ -104,15 +96,14 @@
                 </div>
                 <h3 class="sum-head">🕒 Timeline — click to see the strike at that moment</h3>
                 <canvas id="videoTimeline" width="340" height="90"></canvas>
-                <input type="range" id="videoScrub" min="0" max="100" value="0" style="width:100%" />
+                <input type="range" id="videoScrub" min="0" max="100" value="0" style="width:100%" aria-label="Timeline scrubber" />
                 <div class="card-label" id="videoScrubInfo">—</div>
             </div>
         </section>
 
-        <!-- Recent sessions (live + video history) -->
         <section class="panel">
             <h2>🕘 Session history</h2>
-            <ul class="session-list" id="sessionList"></ul>
+            <ul class="session-list" id="sessionList"><li class="skel" style="height:18px;width:100%"></li><li class="skel" style="height:18px;width:85%"></li></ul>
         </section>
     </main>
 
