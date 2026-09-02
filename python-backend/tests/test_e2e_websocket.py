@@ -189,8 +189,9 @@ def test_websocket_hello_and_frame():
     assert isinstance(frame["keypoints"], list)
     assert isinstance(frame["opponent"], list)
     assert "feedback" in frame
-    assert "debug_frame" in frame
-    assert frame["debug_frame"].startswith("/9j/")  # base64 JPEG
+    # The payload is small JSON only (no debug frame round-trip on purpose).
+    assert "movements" in frame
+    assert "coach" in frame
 
 
 def test_websocket_reset():

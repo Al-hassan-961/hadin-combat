@@ -140,8 +140,10 @@ body {
     height: 100%;
     object-fit: cover;
 }
-#camera { transform: scaleX(-1); }  /* mirror view */
-#overlay { transform: scaleX(-1); z-index: 2; }
+/* The video's mirror is applied dynamically via JS (mirror toggle). The
+   overlay canvas is NOT CSS-flipped; mapPoint() mirrors the drawing to match. */
+#camera { }
+#overlay { z-index: 2; }
 
 .stage-message {
     position: absolute;

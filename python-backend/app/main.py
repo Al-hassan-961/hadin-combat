@@ -24,7 +24,6 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import os
@@ -43,7 +42,6 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from .camera_processor import (
     cv2_info,
     decode_jpeg_frame,
-    jpeg_bytes,
 )
 from .engine import (
     MotionPoseEstimator,
@@ -367,17 +365,12 @@ async def process_frame(websocket: WebSocket, client_id: str,
         movements = sess["movement"].analyze()
         coach = sess["coach"].update(movements)
 
-    # Debug frame: RAW frame (no overlays baked in). The client draws the
-    # skeleton and ghost overlays itself, so the user can toggle them on/off.
-    debug = frame.copy()
-
     # Co-evolution drives difficulty.
     sess["difficulty"] = ai_core.coevolution_step(athlete_profile,
                                                   sess["difficulty"])
 
-    # Opponent generation (pure-Python reflex by default). The opponent is
-    # sent as data only — the CLIENT draws the ghost overlay (toggleable), so
-    # it is never baked into the debug frame (avoids double-drawn stickmen).
+    # Opponent generation (pure-Python reflex by default). Sent as data only —
+    # the CLIENT draws the ghost overlay over the live video (toggleable).
     norm_pose = [{"x": k["x"] / w, "y": k["y"] / h, "score": k["score"]}
                  for k in draw_kps] if draw_kps else []
     opponent = ai_core.generate_opponent(norm_pose, sess["latent"],
@@ -389,16 +382,9 @@ async def process_frame(websocket: WebSocket, client_id: str,
         feedback["notes"] = (coach["advice"] + feedback.get("notes", []))[:3]
     latency_ms = (time.perf_counter() - t0) * 1000.0
 
-    # Compact debug frame: half resolution + lower quality keeps the
-    # WebSocket light on phones.
-    if w > 160 and h > 120:
-        import cv2
-        debug_small = cv2.resize(debug, (w // 2, h // 2),
-                                 interpolation=cv2.INTER_AREA)
-    else:
-        debug_small = debug
-    debug_b64 = base64.b64encode(jpeg_bytes(debug_small, 50)).decode("ascii")
-
+    # NOTE: no debug frame is sent back — the browser draws the overlays on
+    # the LIVE video element, which removes the JPEG round-trip entirely
+    # (this was the main source of camera lag on phones).
     payload = {
         "type": "frame",
         "client_id": client_id,
@@ -410,7 +396,6 @@ async def process_frame(websocket: WebSocket, client_id: str,
         "difficulty": round(sess["difficulty"], 2),
         "latency_ms": round(latency_ms, 2),
         "backend": ai_core.backend,
-        "debug_frame": debug_b64,
     }
     await websocket.send_json(payload)
 

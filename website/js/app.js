@@ -36,9 +36,9 @@
 
     let ws = null;
     let running = false;
-    let showOpponent = true;
-    let showSkeleton = true;
-    let mirrorView = true;
+    let showOpponent = false;   // ghost off by default (avoid confusion)
+    let showSkeleton = true;    // stickman on by default
+    let mirrorView = false;     // natural view by default (no flip)
     let stream = null;
     let captureTimer = null;
     let lastFrameTime = 0;
@@ -171,11 +171,12 @@
 
     // ---- Frame capture -----------------------------------------------------
     function applyViewTransforms() {
-        // Mirror (selfie) view: flip both the video and the overlay canvas so
-        // they always match each other.
-        const t = mirrorView ? 'scaleX(-1)' : 'none';
-        if (els.video) els.video.style.transform = t;
-        if (els.overlay) els.overlay.style.transform = t;
+        // Mirroring is a DISPLAY-only effect: flip the video element via CSS.
+        // The overlay canvas is NOT CSS-flipped — mapPoint() applies the same
+        // flip mathematically so the stickman stays aligned with the video.
+        if (els.video) {
+            els.video.style.transform = mirrorView ? 'scaleX(-1)' : 'none';
+        }
     }
 
     function captureLoop() {
@@ -189,11 +190,8 @@
             canvas.width = els.video.videoWidth || 320;
             canvas.height = els.video.videoHeight || 240;
             const c = canvas.getContext('2d');
-            if (mirrorView) {
-                // Un-mirror for the server so coordinates match raw pixels.
-                c.translate(canvas.width, 0);
-                c.scale(-1, 1);
-            }
+            // Always draw the RAW frame (CSS transforms don't affect
+            // drawImage), so server coordinates = raw camera pixels.
             c.drawImage(els.video, 0, 0);
             canvas.toBlob((blob) => {
                 if (ws && ws.readyState === WebSocket.OPEN) {
@@ -217,25 +215,41 @@
     }
 
     // ---- Rendering ----------------------------------------------------------
+    // The overlay canvas sits on top of the LIVE <video> — there is no
+    // debug-frame round trip. Server keypoints are in RAW camera pixel
+    // coordinates; we map them onto the stage box using the same cover-crop
+    // the video applies, plus the optional mirror flip, so the stickman
+    // always lines up with the body.
+    function stageBox() {
+        const r = els.stage.getBoundingClientRect();
+        return { w: Math.max(1, r.width), h: Math.max(1, r.height) };
+    }
+
+    function mapPoint(px, py) {
+        const vw = els.video.videoWidth || 1;
+        const vh = els.video.videoHeight || 1;
+        const box = stageBox();
+        const scale = Math.max(box.w / vw, box.h / vh);
+        const dw = vw * scale;
+        const dh = vh * scale;
+        const ox = (box.w - dw) / 2;
+        const oy = (box.h - dh) / 2;
+        let x = ox + px * scale;
+        if (mirrorView) x = box.w - x;   // match the flipped video
+        return { x: x, y: oy + py * scale };
+    }
+
     function renderFrame(msg) {
-        const w = els.video.videoWidth || 320;
-        const h = els.video.videoHeight || 240;
-        els.overlay.width = w;
-        els.overlay.height = h;
+        const box = stageBox();
+        els.overlay.width = Math.round(box.w);
+        els.overlay.height = Math.round(box.h);
+        ctx.clearRect(0, 0, box.w, box.h);
 
-        // Base debug frame sent by the server (raw video, no overlays baked in).
-        if (msg.debug_frame) {
-            const img = new Image();
-            img.onload = () => ctx.drawImage(img, 0, 0, w, h);
-            img.src = 'data:image/jpeg;base64,' + msg.debug_frame;
-        }
-
-        // Client-side overlays so the user can toggle each one on/off.
         if (showSkeleton && msg.keypoints && msg.keypoints.length) {
-            drawSkeleton(msg.keypoints, w, h);
+            drawSkeleton(msg.keypoints);
         }
         if (showOpponent && msg.opponent && msg.opponent.length) {
-            drawOpponent(msg.opponent, w, h);
+            drawOpponent(msg.opponent);
         }
 
         els.hudLatency.textContent = (msg.latency_ms || 0) + ' ms';
@@ -251,13 +265,15 @@
         }
     }
 
-    function drawSkeleton(kps, w, h) {
-        const pts = kps.map((k) => ({
-            x: k.x, y: k.y, on: (k.score || 0) >= 0.3,
-        }));
+    function drawSkeleton(kps) {
+        const box = stageBox();
+        const pts = kps.map((k) => {
+            const p = mapPoint(k.x, k.y);
+            return { x: p.x, y: p.y, on: (k.score || 0) >= 0.3 };
+        });
 
         ctx.strokeStyle = '#00ffc8';
-        ctx.lineWidth = Math.max(2, w / 200);
+        ctx.lineWidth = Math.max(2, box.w / 220);
         ctx.lineCap = 'round';
         for (const [a, b] of BONES) {
             if (pts[a] && pts[b] && pts[a].on && pts[b].on) {
@@ -271,30 +287,35 @@
         for (const p of pts) {
             if (!p.on) continue;
             ctx.beginPath();
-            ctx.arc(p.x, p.y, Math.max(2, w / 300), 0, Math.PI * 2);
+            ctx.arc(p.x, p.y, Math.max(2, box.w / 320), 0, Math.PI * 2);
             ctx.fill();
         }
     }
 
-    function drawOpponent(opp, w, h) {
+    function drawOpponent(opp) {
+        const box = stageBox();
+        const vw = els.video.videoWidth || 1;
+        const vh = els.video.videoHeight || 1;
+        // Opponent points are normalized 0..1 -> raw pixels -> mapped.
+        const pts = opp.map((k) => mapPoint(k.x * vw, k.y * vh));
+
         ctx.save();
         ctx.globalAlpha = 0.55;
         ctx.strokeStyle = '#ff285c';
-        ctx.lineWidth = Math.max(2, w / 160);
+        ctx.lineWidth = Math.max(2, box.w / 170);
         ctx.lineCap = 'round';
         for (const [a, b] of BONES) {
-            const pa = opp[a], pb = opp[b];
-            if (pa && pb) {
+            if (pts[a] && pts[b]) {
                 ctx.beginPath();
-                ctx.moveTo(pa.x * w, pa.y * h);
-                ctx.lineTo(pb.x * w, pb.y * h);
+                ctx.moveTo(pts[a].x, pts[a].y);
+                ctx.lineTo(pts[b].x, pts[b].y);
                 ctx.stroke();
             }
         }
         ctx.fillStyle = '#ff285c';
-        for (const k of opp) {
+        for (const p of pts) {
             ctx.beginPath();
-            ctx.arc(k.x * w, k.y * h, Math.max(3, w / 200), 0, Math.PI * 2);
+            ctx.arc(p.x, p.y, Math.max(3, box.w / 220), 0, Math.PI * 2);
             ctx.fill();
         }
         ctx.restore();
