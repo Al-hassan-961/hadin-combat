@@ -66,6 +66,26 @@ PORT=$PORT
 EOF
 fi
 
+# ---------- Termux system deps pre-flight --------------------------------------
+# numpy + OpenCV are system dependencies. On Termux, if they are not
+# importable, install the pre-built packages (never pip-build them).
+ensure_termux_system_deps() {
+    [ "${TERMUX_VERSION:-}" = "" ] && return 0
+    if python3 -c "import numpy, cv2" >/dev/null 2>&1; then
+        ok "System numpy + OpenCV already available."
+        return 0
+    fi
+    warn "numpy/OpenCV not importable – installing Termux pre-built packages..."
+    pkg install -y x11-repo tur-repo >/dev/null 2>&1 || true
+    pkg update -y >/dev/null 2>&1 || true
+    if ! pkg install -y python-numpy python-opencv clang >/dev/null 2>&1; then
+        # Some Termux mirrors name the Python binding package differently.
+        pkg install -y python-numpy python-opencv-python clang >/dev/null 2>&1 || \
+            warn "Auto-install failed. Run manually: pkg install python-numpy python-opencv clang"
+    fi
+    ok "System dependencies ready."
+}
+
 # ---------- detect local IP (Termux-aware) --------------------------------------
 detect_ip() {
     local ip
@@ -78,6 +98,9 @@ detect_ip() {
 LOCAL_IP="$(detect_ip)"
 LAN_URL="http://${LOCAL_IP}:${PORT}"
 LOCAL_URL="http://127.0.0.1:${PORT}"
+
+# ---------- system deps check (Termux) ---------------------------------------------
+ensure_termux_system_deps
 
 # ---------- banner ----------------------------------------------------------------
 clear 2>/dev/null || true

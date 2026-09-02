@@ -22,15 +22,39 @@ warn() { echo -e "${C_YELLOW}[HADIN] ⚠️  $*${C_RESET}"; }
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# ---------- 0. Termux system deps (pre-built, never pip-built) -----------------
+# numpy + OpenCV are system dependencies. On Termux install them via pkg;
+# on other platforms the `.[native]` extra provides the wheels.
+ON_TERMUX=0
+if [ -n "${TERMUX_VERSION:-}" ] || [ -d /data/data/com.termux ]; then
+    ON_TERMUX=1
+fi
+
+if [ "$ON_TERMUX" -eq 1 ]; then
+    info "Termux detected – installing pre-built system packages..."
+    pkg install -y x11-repo tur-repo >/dev/null 2>&1 || true
+    pkg update -y >/dev/null 2>&1 || true
+    if ! pkg install -y python-numpy python-opencv clang >/dev/null 2>&1; then
+        pkg install -y python-numpy python-opencv-python clang >/dev/null 2>&1 || \
+            warn "pkg install failed. Run manually: pkg install python-numpy python-opencv clang"
+    fi
+    ok "System numpy + OpenCV ready."
+fi
+
 # ---------- 1. Python env ------------------------------------------------------
 info "Step 1/4: Creating Python virtual environment..."
-python3 -m venv .venv
+python3 -m venv --system-site-packages .venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
 pip install --upgrade pip
-# setup.py installs numpy + opencv-python on Linux/macOS/Windows and
-# skips them on Android/Termux (where they come from the OS package manager).
+# setup.py NEVER installs numpy/OpenCV via pip. On Termux they already come
+# from pkg; on Linux/macOS/Windows the `.[native]` extra adds the wheels.
 pip install -e .
+if [ "$ON_TERMUX" -eq 1 ]; then
+    ok "Skipped pip numpy/OpenCV (provided by Termux pkg)."
+else
+    pip install -e ".[native]"
+fi
 pip install pytest ruff black
 pip install -e ".[mediapipe]" >/dev/null 2>&1 || true
 ok "Python environment ready."

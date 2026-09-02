@@ -76,8 +76,10 @@ flowchart LR
 ### 📱 Android (Termux)
 
 ```bash
-# 1. Pre-built native binaries (never compiled on Android):
-pkg install -y python-numpy python-opencv-python
+# 1. (Optional) extra repos, then pre-built native binaries (never compiled):
+pkg install -y x11-repo tur-repo
+pkg update
+pkg install -y python-numpy python-opencv clang
 
 # 2. Clone and run the one-command setup:
 git clone https://github.com/Al-hassan-961/hadin-combat.git
@@ -85,12 +87,13 @@ cd hadin-combat
 bash scripts/termux_quickstart.sh
 ```
 
-> 🔧 **Zero compilation on Android.** `numpy` and OpenCV are installed as
-> Termux's pre-built packages; `setup.py` detects Termux (via `TERMUX_VERSION`,
-> `/data/data/com.termux`, or `sys.platform == 'android'`) and **skips** them
-> in `pip install -e .`, so pip never triggers a C source build (which would
-> fail because Android's Bionic libc lacks `ctanh`). All other dependencies
-> are pure-Python wheels.
+> 🔧 **Zero compilation on Android.** `numpy` and OpenCV are **system
+> dependencies** (Termux `pkg` packages), never pip dependencies: they are
+> completely absent from `install_requires`/`requirements.txt`, so pip never
+> attempts a C source build (no ARM64 wheels for Python 3.14 → ninja
+> `highway_qsort` crash). The venv is created with `--system-site-packages`
+> so the pkg-installed numpy/OpenCV are visible. All other dependencies are
+> pure-Python wheels.
 
 The script installs dependencies, starts the server, and prints:
 

@@ -48,7 +48,7 @@ cd "$PROJECT_DIR"
 
 # ---------- 3. venv + deps + build ----------------------------------------------
 info "Step 3/4: Setting up Python and dependencies..."
-python3 -m venv .venv
+python3 -m venv --system-site-packages .venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
 pip install --upgrade pip >/dev/null 2>&1 || true

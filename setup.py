@@ -3,11 +3,11 @@
 # Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
 # All rights reserved.
 #
-# Installs the `app` package (python-backend/app) with platform-aware
-# dependencies. On Android/Termux we NEVER let pip build C extensions from
-# source: numpy and OpenCV are provided by Termux's pre-built packages
-# (`pkg install python-numpy python-opencv-python`), so we omit them from
-# install_requires here and warn the user to install them via `pkg`.
+# Installs the `app` package (python-backend/app). numpy and OpenCV are SYSTEM
+# dependencies, never pip build dependencies: on Termux they come from the
+# pre-built packages (`pkg install python-numpy python-opencv clang`), on
+# Ubuntu CI from apt, and on desktop via the `.[native]` extra or the OS
+# package manager. pip is therefore never asked to compile them.
 # ---------------------------------------------------------------------------
 import os
 import sys
@@ -48,7 +48,7 @@ def native_from_os_packages() -> bool:
 # binaries) rather than a pip source build.
 HEAVY_TERMUX_PACKAGES = {
     "numpy": "python-numpy",
-    "opencv-python": "python-opencv-python",
+    "opencv-python": "python-opencv (or python-opencv-python)",
     "scipy": "python-scipy",
     "matplotlib": "python-matplotlib",
     "scikit-learn": "python-scikit-learn",
@@ -57,8 +57,19 @@ HEAVY_TERMUX_PACKAGES = {
 
 
 def install_requires() -> list:
-    """Core dependencies, with OpenCV/NumPy handled per-platform."""
-    reqs = [
+    """Core dependencies (pure-Python wheels only).
+
+    numpy and OpenCV are deliberately NOT listed here — they are SYSTEM
+    dependencies provided by the OS package manager and must never be built
+    by pip (on Android there are no ARM64 wheels for new Pythons, and a
+    source build fails with ninja/highway_qsort errors):
+      - Termux:     pkg install python-numpy python-opencv clang
+      - Ubuntu CI:  apt install python3-numpy python3-opencv
+      - Desktop:    pip install -e ".[native]"  (or your system manager)
+    """
+    if on_termux():
+        _warn_heavy_packages()
+    return [
         "fastapi>=0.110,<1",
         # Plain uvicorn (no [standard] extras) so no C/Rust extensions
         # (uvloop, httptools, watchfiles) are ever compiled. WebSockets are
@@ -71,23 +82,12 @@ def install_requires() -> list:
         "python-multipart>=0.0.9",
     ]
 
-    if native_from_os_packages():
-        # Pure-Python deps only. numpy + cv2 come from the OS package manager
-        # (`pkg` on Termux, `apk` on iSH/Alpine).
-        _warn_heavy_packages()
-        return reqs
-
-    # Non-Android (Linux/macOS/Windows): install wheels from pip.
-    # `opencv-python` (the standard binding) rather than opencv-python-headless,
-    # since the app benefits from the full binding and it has broad wheel support.
-    reqs.append("numpy>=1.24")
-    reqs.append("opencv-python>=4.8")
-    return reqs
-
 
 def extras_require() -> dict:
-    """Optional extras. MediaPipe improves pose quality but is never required."""
+    """Optional extras — nothing here is installed by default."""
     return {
+        # Desktop convenience: system-class deps via wheels (never on Termux).
+        "native": ["numpy>=1.24", "opencv-python>=4.8"],
         "mediapipe": ["mediapipe>=0.10"],
         "dev": ["pytest", "httpx", "ruff"],
     }
@@ -102,12 +102,13 @@ def _warn_heavy_packages() -> None:
         except ImportError:
             missing.append(f"  - {mod:24} -> pkg install {pkg}")
     if missing:
-        print("\n[HADIN] Android/Termux detected. The following native packages "
-              "are provided by Termux's pre-built binaries (never pip-built):",
+        print("\n[HADIN] Termux detected. These native packages are provided by "
+              "Termux's pre-built binaries (never pip-built):",
               file=sys.stderr)
         print("\n".join(missing), file=sys.stderr)
         print("\n[HADIN] Install them with:  pkg install python-numpy "
-              "python-opencv-python python-scipy python-matplotlib\n", file=sys.stderr)
+              "python-opencv clang   (add tur-repo first if needed)\n",
+              file=sys.stderr)
 
 
 setup(

@@ -3,9 +3,14 @@
 # Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
 # All rights reserved.
 #
-# Build configuration. Dependency resolution (including Android/Termux handling)
-# lives in setup.py so it can make a runtime platform decision; this file only
-# declares the build backend.
+# Build configuration. Dependency resolution lives in setup.py.
+#
+# NOTE: numpy and OpenCV are SYSTEM dependencies (never pip build deps):
+#   Termux:  pkg install python-numpy python-opencv clang
+#   Ubuntu:  apt install python3-numpy python3-opencv
+# They are intentionally absent from install_requires so pip never compiles
+# them from source on Android (no ARM64 wheels for Python 3.14 -> ninja
+# `highway_qsort` crash). Desktop users: pip install -e ".[native]".
 # ---------------------------------------------------------------------------
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

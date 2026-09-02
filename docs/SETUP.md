@@ -65,33 +65,35 @@ cmake --build build
 
 ## Termux (Android)
 
-> **Zero compilation:** on Termux you must install `numpy` and OpenCV via
-> Termux's pre-built packages (`pkg`) — **never** via `pip`, which would build
-> NumPy from source and fail because Android's Bionic libc lacks `ctanh`.
+> **Zero compilation:** numpy and OpenCV are **system dependencies** on Termux —
+> installed via `pkg` pre-built binaries, **never** via `pip` (no ARM64 wheels
+> for new Pythons; source builds fail with the ninja `highway_qsort` crash).
 
 ```bash
 pkg update -y && pkg upgrade -y
 
-# 1. Pre-built native binaries (numpy + Python OpenCV bindings):
-pkg install -y python-numpy python-opencv-python
+# 0. (Optional) extra repos, then pre-built native binaries:
+pkg install -y x11-repo tur-repo
+pkg update
+pkg install -y python-numpy python-opencv clang
 
-# 2. Clone and run the one-command setup:
+# 1. Clone and run the one-command setup:
 git clone https://github.com/Al-hassan-961/hadin-combat.git
 cd hadin-combat
 bash scripts/termux_quickstart.sh
 ```
 
-The script creates a venv, runs `pip install -e .` (whose `setup.py` detects
-Termux and skips numpy/OpenCV so pip never compiles anything), writes `.env`,
-and starts the server.
+The script creates a **`--system-site-packages` venv** (so the pkg-installed
+numpy/OpenCV are visible), runs `pip install -e .` (setup.py never lists
+numpy/OpenCV, so pip compiles nothing), writes `.env`, and starts the server.
 
 ### Manual alternative
 
 ```bash
-pkg install -y python-numpy python-opencv-python
-python -m venv .venv && source .venv/bin/activate
+pkg install -y python-numpy python-opencv clang
+python -m venv --system-site-packages .venv && source .venv/bin/activate
 pip install --upgrade pip
-pip install -e .            # skips numpy + opencv on Termux (setup.py)
+pip install -e .            # no numpy/OpenCV in install_requires (system deps)
 cd python-backend && uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 

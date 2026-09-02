@@ -51,15 +51,20 @@ pkg upgrade -y >/dev/null 2>&1 || true
 
 # ---------- Step 2: install pre-built system packages --------------------------
 info "Step 2/6: Installing pre-built Termux packages (numpy + OpenCV)..."
-# python-numpy and python-opencv-python provide native binaries so pip never
-# needs to compile C extensions. clang/cmake are only for the optional C++ core.
-pkg install -y \
+# numpy + OpenCV are SYSTEM dependencies — installed via pkg, never pip-built
+# (no ARM64 wheels for Python 3.14; source builds crash in ninja/highway_qsort).
+pkg install -y x11-repo tur-repo >/dev/null 2>&1 || true
+pkg update -y >/dev/null 2>&1 || true
+if ! pkg install -y \
     git python clang cmake make pkg-config binutils \
-    python-numpy python-opencv-python qrencode \
-    >/dev/null 2>&1 || {
-        warn "Some packages failed. At minimum you need: pkg install python-numpy python-opencv-python"
-        warn "Re-run: pkg install -y python-numpy python-opencv-python qrencode"
-    }
+    python-numpy python-opencv qrencode \
+    >/dev/null 2>&1; then
+    # Some mirrors name the Python binding package python-opencv-python.
+    pkg install -y \
+        git python clang cmake make pkg-config binutils \
+        python-numpy python-opencv-python qrencode \
+        >/dev/null 2>&1 || warn "Re-run manually: pkg install python-numpy python-opencv clang"
+fi
 ok "Pre-built native dependencies installed (no C compilation)."
 
 # ---------- Step 3: clone / enter repo ------------------------------------------
@@ -73,7 +78,7 @@ ok "Working in $(pwd)"
 
 # ---------- Step 4: python venv + deps -------------------------------------------
 info "Step 4/6: Setting up Python virtual environment..."
-python -m venv .venv
+python -m venv --system-site-packages .venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
 pip install --upgrade pip >/dev/null 2>&1 || true

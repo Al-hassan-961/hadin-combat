@@ -3,28 +3,23 @@
 # Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
 # All rights reserved.
 #
-# NOTE FOR ANDROID / TERMUX USERS:
-#   Do NOT rely on this file on Termux. pip must never build C extensions
-#   there (NumPy's source build fails because Android's Bionic libc lacks
-#   `ctanh`). Instead install Termux's pre-built binaries and use setup.py:
+# IMPORTANT: numpy and OpenCV are SYSTEM dependencies, not pip dependencies.
+# They are NEVER listed here, so pip can never attempt a C source build
+# (which fails on Termux/Android for Python 3.14: no ARM64 wheels, and the
+# ninja `highway_qsort` build crash). Install them from your OS package
+# manager instead:
 #
-#       pkg install python-numpy python-opencv-python
-#       pip install -e .
+#   Termux:     pkg install x11-repo tur-repo
+#               pkg update
+#               pkg install python-numpy python-opencv clang
+#   Ubuntu:     sudo apt install python3-numpy python3-opencv
+#   Desktop:    pip install -e ".[native]"   (convenience wheels)
 #
-#   The `; sys_platform != 'android'` markers below exclude numpy/OpenCV on
-#   Termux as a safety net. On Linux/macOS/Windows this file installs the
-#   normal pre-built wheels. All remaining deps are pure-Python wheels (no
-#   C source builds).
+# Everything below is a pure-Python wheel (no C compilation).
 # ---------------------------------------------------------------------------
 fastapi==0.111.0
 # Plain uvicorn (no [standard] extras) to avoid compiling uvloop/httptools.
 uvicorn==0.30.1
-# numpy and OpenCV install from wheels on non-Android platforms. On Termux
-# they come from `pkg` (pre-built):  pkg install python-numpy python-opencv-python
-numpy>=1.24 ; sys_platform != 'android'
-# Standard `opencv-python` binding (not headless) — the more complete and
-# better-supported choice on desktops; Android uses the system package.
-opencv-python>=4.8 ; sys_platform != 'android'
 websockets==12.0
 pybind11==2.12.0
 python-dotenv==1.0.1

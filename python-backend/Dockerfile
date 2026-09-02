@@ -16,7 +16,11 @@ WORKDIR /build
 # Python dependencies layer (cached first)
 COPY python-backend/requirements.txt /build/requirements.txt
 COPY python-backend/requirements-optional.txt /build/requirements-optional.txt
+# numpy + OpenCV are system-class deps; on Linux the container installs them
+# via wheels (they are intentionally NOT in requirements.txt, so pip never
+# builds them from source on Android).
 RUN pip install --prefix=/install -r /build/requirements.txt \
+    && pip install --prefix=/install "numpy>=1.24" "opencv-python>=4.8" \
     && pip install --prefix=/install -r /build/requirements-optional.txt || true
 
 # ---- Runtime image ---------------------------------------------------------
