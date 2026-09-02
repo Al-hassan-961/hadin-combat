@@ -264,8 +264,10 @@
         ve.suggestions.textContent = (s.suggestions || []).join(' · ');
         videoData = result;
         ve.result.hidden = false;
+        const engineNote = result.engine === 'gated-v2' ? ' (gated engine v2)' : ' ⚠ stale server — restart run.sh!';
         ve.status.textContent = 'Done — ' + ((result.timeline || []).length) +
-            ' confident strikes detected.';
+            ' confident strikes detected' + engineNote +
+            (result.rate_limited ? ' · rate-limited' : '');
         drawVideoTimeline();
         const dur = Math.max(1, result.duration_s || 1);
         ve.scrub.max = 100;

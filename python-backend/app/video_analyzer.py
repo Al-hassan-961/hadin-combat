@@ -39,6 +39,7 @@ PoseFn = Callable[[Any], Optional[List[Dict[str, float]]]]
 FATIGUE_SAMPLE_S = 0.5     # seconds between fatigue-curve samples
 TARGET_FPS = 10            # analyse at ~10 fps regardless of source fps
 ONSET_SPEED = 0.30         # speed (norm units / s) that marks a movement onset
+MAX_STRIKES_PER_SEC = 4.0  # hard physiological ceiling for the safety cap
 UNCERTAIN_WINDOW = 0.5     # how long an 'uncertain' note stays visible
 
 
@@ -231,18 +232,51 @@ def analyze_frames_iter(pose_fn: PoseFn, frames: Iterator[Any],
         if progress_cb and total_hint:
             progress_cb(min(100.0, (i + 1) / total_hint * 100))
 
-    counts = pipe.coach.counts
+    counts = dict(pipe.coach.counts)
     duration = duration_hint or t
+    timeline = list(pipe.timeline)
+
+    # ---- HARD SAFETY CAP ----------------------------------------------------
+    # Even a pathological input must never report absurd totals. A human can
+    # realistically throw ~2-4 strikes/s; cap at 4/s with a small minimum, and
+    # if we somehow exceed it, truncate + flag (never trust the detector more
+    # than human physiology).
+    cap = max(8, int(round(duration * MAX_STRIKES_PER_SEC)))
+    rate_limited = len(timeline) > cap
+    if rate_limited:
+        timeline = timeline[:cap]
+        # Rebuild counts from the kept timeline so totals always agree.
+        counts = {}
+        for e in timeline:
+            counts[e["type"]] = counts.get(e["type"], 0) + 1
+
+    measured = [r for r in pipe.reaction_samples if r and r > 0]
+    reaction = (sum(measured) / len(measured)) if measured else None
+    final_fatigue = pipe.fatigue.score()["score"] if pipe.fatigue_curve else None
+    landed = sum(1 for e in timeline
+                 if (e.get("quality", 0) or 0) >= 70
+                 or (e.get("confidence", 0) or 0) >= 0.8)
+    summary = build_session_summary(
+        total_strikes=len(timeline), landed=landed, counts=counts,
+        avg_quality=pipe.coach.metrics().get("avg_quality", 0),
+        tempo=pipe.coach.metrics().get("tempo_per_s", 0),
+        reaction_s=reaction, final_fatigue=final_fatigue,
+        duration_s=duration, fatigue_curve=pipe.fatigue_curve)
+
     return {
         "source": "video",
+        "engine": "gated-v2",                     # identifies the fixed engine
+        "confidence_threshold": 0.6,              # strikes below this are dropped
+        "max_strikes_per_s": MAX_STRIKES_PER_SEC,
+        "rate_limited": rate_limited,
         "fps": fps,
         "duration_s": round(duration, 1),
         "frames_analysed": seen,
-        "timeline": pipe.timeline,
+        "timeline": timeline,
         "fatigue_curve": pipe.fatigue_curve,
-        "techniques": dict(counts),
+        "techniques": counts,
         "debug": pipe.debug_report(),
-        "summary": pipe.summary(counts, duration),
+        "summary": summary,
     }
 
 

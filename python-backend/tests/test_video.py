@@ -162,3 +162,25 @@ def test_compose_summary_via_main_helpers():
     assert s["most_used"] == "jab"
     assert 0 <= s["performance"] <= 100
     assert s["source"] == "live"
+
+
+def test_adversarial_noise_is_bounded():
+    """Extreme frame-to-frame motion (worst-case jitter) can NEVER produce one
+    strike per frame - the gate + hard cap keep totals physiologically sane."""
+    poses_a = make_pose_px({9: (0.2, 0.2), 10: (0.8, 0.8)})
+    poses_b = make_pose_px({9: (0.8, 0.8), 10: (0.2, 0.2)})
+    frames = [np.zeros((H, W, 3), dtype=np.uint8) for _ in range(100)]  # 10s @10fps
+    idx = [0]
+
+    def pose_fn(frame):
+        pose = poses_a if idx[0] % 2 == 0 else poses_b
+        idx[0] += 1
+        return pose
+
+    result = analyze_frames_iter(pose_fn, iter(frames), fps=10, duration_hint=10.0)
+    total = result["summary"]["total_strikes"]
+    assert result["engine"] == "gated-v2"
+    assert total <= 8 + int(10 * 4)          # hard cap = 48 max for 10 s
+    assert total < 50
+    assert "rate_limited" in result
+    assert all((e.get("confidence") or 0) >= 0.6 for e in result["timeline"])
