@@ -15,12 +15,12 @@ import sys
 
 import pytest
 
-# The e2e server test requires FastAPI/uvicorn. On platforms where their Rust
-# deps (pydantic-core) have no wheel and can't be built, skip gracefully.
+# The e2e server test requires Starlette (pure wheels) + uvicorn. On platforms
+# where even that is unavailable, skip gracefully.
 try:
-    from fastapi.testclient import TestClient
+    from starlette.testclient import TestClient
 except Exception:  # noqa: BLE001
-    pytest.skip("FastAPI not available on this platform; skipping e2e test",
+    pytest.skip("Starlette not available on this platform; skipping e2e test",
                 allow_module_level=True)
 
 # Install the cv2 shim BEFORE importing app modules (they import cv2 at load).

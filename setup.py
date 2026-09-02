@@ -70,7 +70,11 @@ def install_requires() -> list:
     if on_termux():
         _warn_heavy_packages()
     return [
-        "fastapi>=0.110,<1",
+        # Starlette (NOT FastAPI) — FastAPI pulls pydantic-core (Rust), which
+        # has no ARM64 wheel for Python 3.14 and can't be compiled on Termux.
+        # Starlette provides the same routing/WebSocket/static serving we use
+        # with zero compiled dependencies (pure-Python wheels).
+        "starlette>=0.46,<2",
         # Plain uvicorn (no [standard] extras) so no C/Rust extensions
         # (uvloop, httptools, watchfiles) are ever compiled. WebSockets are
         # served by the `websockets` package listed below.

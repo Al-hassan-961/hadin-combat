@@ -35,7 +35,7 @@ flowchart LR
         FB[Real-time Feedback] <-->|JSON WebSocket| S
     end
 
-    subgraph Server["🖥️ Backend (FastAPI)"]
+    subgraph Server["🖥️ Backend (Starlette)"]
         S[WebSocket Gateway] --> PP[Pose Estimation]
         PP --> SE[Style Encoder]
         SE --> OG[Opponent Generator]
@@ -190,6 +190,6 @@ Released under the **MIT License**. Copyright (c) 2026 Al-hassan Shehade & Dina 
 | Layer | Technology |
 |---|---|
 | Core AI inference | C++17/20 · ONNX Runtime · pybind11 |
-| Backend | Python 3.10+ · FastAPI · WebSockets · OpenCV · MediaPipe |
+| Backend | Python 3.10+ · Starlette (ASGI) · WebSockets · OpenCV · MediaPipe |
 | Frontend | HTML5 · CSS · JavaScript · Canvas · getUserMedia |
 | Deployment | Docker Compose · uvicorn · Redis |

@@ -6,23 +6,23 @@
 # Fallback for constrained installs. IMPORTANT: a constraints file can only
 # PIN the version of a package that is otherwise requested — it CANNOT remove
 # a dependency the project lists. To stop pip resolving the OpenCV binding you
-# must (a) use `pip install -e .` (setup.py skips it on Termux), or
+# must (a) use `pip install -e .` (setup.py never lists it), or
 # (b) install with `--no-deps` and add the pure deps yourself (see below).
 #
 # Usage (Termux):
-#   pkg install python-numpy python-opencv-python
-#   pip install -e . -c constraints.txt            # setup.py already skips OpenCV
+#   pkg install python-numpy python-opencv clang
+#   pip install -e . -c constraints.txt            # setup.py never lists OpenCV
 #   # or, bypassing the resolver entirely:
 #   pip install --no-deps -e . -c constraints.txt
-#   pip install -c constraints.txt fastapi uvicorn python-dotenv \
+#   pip install -c constraints.txt starlette uvicorn python-dotenv \
 #       websockets redis python-multipart pybind11
 # ---------------------------------------------------------------------------
-# OpenCV is provided by Termux (pkg install python-opencv-python) and must
-# NEVER be built from source on Android. If a dependency still requests it,
-# install with --no-deps (below) rather than allowing a source build.
+# OpenCV + numpy are provided by Termux (pkg install python-numpy
+# python-opencv clang) and must NEVER be built from source on Android.
+# Starlette (not FastAPI) avoids pydantic-core's Rust build entirely.
 # opencv-python==0 ; sys_platform != 'android'
 
-fastapi==0.111.0
+starlette>=0.46,<2
 uvicorn==0.30.1
 websockets==12.0
 pybind11==2.12.0

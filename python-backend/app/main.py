@@ -3,10 +3,17 @@
 # Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
 # All rights reserved.
 #
-# FastAPI server:
+# Starlette/ASGI server (FastAPI-free on purpose):
 #   - serves the HTML5 frontend
 #   - exposes REST endpoints for stats/profile
 #   - exposes a WebSocket /ws/{client_id} for real-time pose → opponent → feedback
+#
+# WHY STARLETTE INSTEAD OF FASTAPI:
+#   FastAPI pulls in pydantic-core (Rust), which has no ARM64 wheel for
+#   Python 3.14 and cannot be compiled on Android/Termux. Starlette provides
+#   the same routing, WebSocket, FileResponse/JSONResponse and StaticFiles we
+#   use, with ZERO compiled dependencies (pure-Python wheels) — so the whole
+#   backend installs on Termux with no C/Rust compilation.
 #
 # The AI pipeline is Python-first and ALWAYS functional:
 #   - Pose:   C++ ONNX core → MediaPipe → OpenCV motion fallback → none
@@ -27,9 +34,11 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from starlette.applications import Starlette
+from starlette.responses import FileResponse, JSONResponse
+from starlette.routing import Mount, Route, WebSocketRoute
+from starlette.staticfiles import StaticFiles
+from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from .camera_processor import (
     cv2_info,
@@ -81,11 +90,8 @@ MODEL_PATHS = {
 
 __version__ = "1.0.0"
 
-app = FastAPI(
-    title="HADIN-COMBAT",
-    description="The AI Opponent That Learns Your Fighting DNA",
-    version=__version__,
-)
+# The Starlette application is assembled at the bottom of this module once
+# all endpoint functions are defined (routes reference them).
 
 
 # ---------------------------------------------------------------------------
@@ -412,15 +418,13 @@ async def handle_json(websocket: WebSocket, client_id: str, text: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Routes
+# Routes (endpoints; the Starlette routes are assembled at the bottom)
 # ---------------------------------------------------------------------------
-@app.get("/")
-async def index() -> FileResponse:
+async def index(request) -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
-@app.get("/api/health")
-async def api_health() -> JSONResponse:
+async def api_health(request) -> JSONResponse:
     return JSONResponse({
         "status": "ok",
         "name": "hadin-combat",
@@ -431,8 +435,7 @@ async def api_health() -> JSONResponse:
     })
 
 
-@app.get("/api/stats")
-async def api_stats() -> JSONResponse:
+async def api_stats(request) -> JSONResponse:
     return JSONResponse({
         "backend": ai_core.backend,
         "sessions": sessions.all_sessions(),
@@ -441,7 +444,6 @@ async def api_stats() -> JSONResponse:
     })
 
 
-@app.websocket("/ws/{client_id}")
 async def ws_endpoint(websocket: WebSocket, client_id: str) -> None:
     await websocket.accept()
     sessions.create(client_id)
@@ -477,9 +479,18 @@ async def ws_endpoint(websocket: WebSocket, client_id: str) -> None:
             pass
 
 
+# ---- Starlette application (FastAPI-free: zero compiled dependencies) ----------
+_routes = [
+    Route("/", endpoint=index, methods=["GET"]),
+    Route("/api/health", endpoint=api_health, methods=["GET"]),
+    Route("/api/stats", endpoint=api_stats, methods=["GET"]),
+    WebSocketRoute("/ws/{client_id}", endpoint=ws_endpoint),
+]
 # Mount static assets when a local copy exists.
 if STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    _routes.append(Mount("/static", app=StaticFiles(directory=STATIC_DIR), name="static"))
+
+app = Starlette(routes=_routes)
 
 
 if __name__ == "__main__":

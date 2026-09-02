@@ -18,7 +18,7 @@ flowchart TB
         REND --> DISP[Neon skeleton + ghost opponent]
     end
 
-    subgraph Server[FastAPI / uvicorn]
+    subgraph Server[Starlette / uvicorn]
         WS[WebSocket gateway]
         WS --> DEC[decode_jpeg_frame]
         DEC --> PPE[Pose Estimation]
@@ -92,7 +92,7 @@ processes frames asynchronously so the UI never blocks on a slow backend.
 ## 4. Threading & Concurrency
 
 - **uvicorn** runs the ASGI app. Each WebSocket connection is an independent
-  coroutine; FastAPI's event loop never blocks on I/O.
+  coroutine; Starlette's event loop never blocks on I/O.
 - **ONNX Runtime** `IntraOpNumThreads = 2` bounds CPU contention inside the
   C++ core, keeping inference off the critical asyncio path per request.
 - **SessionManager** is an in-memory dict keyed by `client_id`. In production,

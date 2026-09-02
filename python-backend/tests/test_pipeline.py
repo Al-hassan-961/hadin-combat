@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
 # All rights reserved.
 # ---------------------------------------------------------------------------
-"""Integration test of the pure-Python AI pipeline (no FastAPI required).
+"""Integration test of the pure-Python AI pipeline (no Starlette required).
 
 This mirrors the data flow of app.main.process_frame using the real
 engine + camera_processor modules: JPEG -> decode -> pose -> style ->

@@ -54,7 +54,7 @@ The build automatically applies ARM64/NEON optimizations.
 
 ## Output
 
-The build copies `hadin_core.so` into `../python-backend/app/` so the FastAPI
+The build copies `hadin_core.so` into `../python-backend/app/` so the Starlette
 server can import it as:
 
 ```python

@@ -17,7 +17,10 @@
 #
 # Everything below is a pure-Python wheel (no C compilation).
 # ---------------------------------------------------------------------------
-fastapi==0.111.0
+# Starlette (NOT FastAPI) — FastAPI needs pydantic-core (Rust) which has no
+# ARM64 wheel for Python 3.14 and can't be built on Android. Starlette covers
+# our routing/WebSocket/static needs with zero compiled dependencies.
+starlette>=0.46,<2
 # Plain uvicorn (no [standard] extras) to avoid compiling uvloop/httptools.
 uvicorn==0.30.1
 websockets==12.0
