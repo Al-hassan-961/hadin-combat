@@ -444,7 +444,13 @@ async def api_stats(request) -> JSONResponse:
     })
 
 
-async def ws_endpoint(websocket: WebSocket, client_id: str) -> None:
+async def ws_endpoint(websocket: WebSocket, **kwargs: Any) -> None:
+    # Starlette >= 1.6 calls WebSocket endpoints with only the session; older
+    # versions pass path params as kwargs. Read client_id from either source.
+    client_id: str = str(
+        kwargs.get("client_id") or websocket.path_params.get("client_id")
+        or "anonymous"
+    )
     await websocket.accept()
     sessions.create(client_id)
     logger.info("WS connect: %s", client_id)
