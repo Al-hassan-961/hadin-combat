@@ -6,11 +6,14 @@
 # Movement detection + professional coaching engine.
 #
 # MovementAnalyzer runs kinematic analysis on the normalized pose stream and
-# recognizes martial-arts techniques (jab/cross/hook/uppercut, front/round
-# kicks, knee raises, guard, stance). It works with ANY pose backend (C++,
-# MediaPipe or the OpenCV motion fallback) because it only needs the same
-# COCO 17 keypoints. CoachEngine tracks session statistics (technique counts,
-# quality, tempo) and produces actionable, coach-style advice.
+# recognizes martial-arts techniques — basic (jab/cross/hook/uppercut,
+# front/roundhouse kicks, knee raises, guard, stance) and complex (superman
+# punch, spinning backfist, axe kick, question-mark kick) — each with a
+# confidence score. It works with ANY pose backend (C++, MediaPipe or the
+# OpenCV motion fallback) because it only needs the same COCO 17 keypoints.
+#
+# CoachEngine tracks session statistics (technique counts, quality, tempo)
+# and produces actionable, coach-style advice.
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
@@ -28,7 +31,9 @@ L_KNEE, R_KNEE = 13, 14
 L_ANKLE, R_ANKLE = 15, 16
 
 STRIKE_TYPES = {"jab", "cross", "hook", "uppercut",
-                "front_kick", "roundhouse_kick"}
+                "front_kick", "roundhouse_kick", "knee_raise",
+                "superman_punch", "spinning_backfist",
+                "axe_kick", "question_mark_kick"}
 
 # Per-technique professional advice (rotated per repetition).
 ADVICE: Dict[str, List[str]] = {
@@ -65,6 +70,26 @@ ADVICE: Dict[str, List[str]] = {
     "knee_raise": [
         "Great knee drive — turn it into a strike by extending the shin.",
         "Stay tall: don't lean back when you lift the knee.",
+    ],
+    "superman_punch": [
+        "Leap and drive the lead hand forward as the back leg extends behind you.",
+        "Land light on your feet and snap back to your stance.",
+        "Exhale sharply as the superman punch lands.",
+    ],
+    "spinning_backfist": [
+        "Pivot the lead foot and rotate the hips before whipping the backfist around.",
+        "Keep your eyes over your shoulder as you spin — don't lose your target.",
+        "Stay balanced on the finish so you can follow up.",
+    ],
+    "axe_kick": [
+        "Drive the leg straight up with control, then slam it down through the target.",
+        "Keep your standing leg planted and your hands up.",
+        "Don't let the axe kick turn into a crescent — bring it straight down.",
+    ],
+    "question_mark_kick": [
+        "Show the front kick, then snap the shin across as a head kick at the last second.",
+        "The feint is everything — sell the low kick before the high switch.",
+        "Pivot on your support foot to get the shin across.",
     ],
     "block": [
         "Excellent defense — follow the block with an immediate counter.",
@@ -106,8 +131,61 @@ def _pt(kps: Sequence[Dict[str, float]], idx: int) -> Optional[Tuple[float, floa
     return (k["x"], k["y"])
 
 
+def _score(kps: Sequence[Dict[str, float]], idx: int) -> float:
+    if idx < 0 or idx >= len(kps):
+        return 0.0
+    return float(kps[idx].get("score", 0.0))
+
+
 def _speed(a: Tuple[float, float], b: Tuple[float, float]) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+
+class _TorsoState:
+    """Track torso lean and shoulder-line rotation over a pose window."""
+
+    def __init__(self) -> None:
+        self.lean = 1.0            # hip->nose vertical distance (normalized)
+        self.lean_delta = 0.0      # change over window (neg = leaning forward)
+        self.shoulder_flip = 0.0   # 1 if shoulders swapped sides
+        self.spin = 0.0            # max shoulder-midpoint horizontal speed
+
+    @staticmethod
+    def compute(frames: List[List[Dict[str, float]]]) -> "_TorsoState":
+        st = _TorsoState()
+        if len(frames) < 3:
+            return st
+        def torso(first: List[Dict[str, float]]) -> Optional[float]:
+            hip_l, hip_r = _pt(first, L_HIP), _pt(first, R_HIP)
+            nose = _pt(first, NOSE)
+            if nose and hip_l and hip_r:
+                hy = (hip_l[1] + hip_r[1]) / 2
+                return max(0.01, hy - nose[1])  # vertical gap
+            return None
+        t0 = torso(frames[0])
+        t1 = torso(frames[-1])
+        if t0 and t1:
+            st.lean = t1
+            st.lean_delta = (t1 - t0) / max(t0, 0.001)  # neg => leaning forward
+
+        # Shoulder line: orientation + lateral sweep of the shoulder pair.
+        def shoulders(f: List[Dict[str, float]]):
+            sl, sr = _pt(f, L_SHOULDER), _pt(f, R_SHOULDER)
+            if sl and sr:
+                return sl, sr
+            return None
+        s0 = shoulders(frames[0])
+        s1 = shoulders(frames[-1])
+        if s0 and s1:
+            sl0, sr0 = s0
+            sl1, sr1 = s1
+            # Did the labelled left/right shoulders cross (i.e. ~180deg turn)?
+            if abs((sr0[0] - sl0[0])) > 1e-6:
+                st.shoulder_flip = 1.0 if (sr1[0] - sl1[0]) * (sr0[0] - sl0[0]) < 0 else 0.0
+            mid0 = ((sl0[0] + sr0[0]) / 2, (sl0[1] + sr0[1]) / 2)
+            mid1 = ((sl1[0] + sr1[0]) / 2, (sl1[1] + sr1[1]) / 2)
+            st.spin = _speed(mid0, mid1)
+        return st
 
 
 class MovementAnalyzer:
@@ -128,8 +206,10 @@ class MovementAnalyzer:
         if len(self._buffer) < 4:
             return detections
         frames = list(self._buffer)
+        torso = _TorsoState.compute(frames)
         detections.extend(self._detect_arms(frames))
         detections.extend(self._detect_legs(frames))
+        detections.extend(self._detect_complex(frames, torso))
         detections.append(self._assess_stance(frames[-1]))
         return detections
 
@@ -145,18 +225,25 @@ class MovementAnalyzer:
 
     @staticmethod
     def _detection(mtype: str, side: str, quality: float,
+                   confidence: float = 0.75,
                    extra: Optional[List[str]] = None) -> Dict[str, Any]:
         notes = list(ADVICE.get(mtype, []))
         if extra:
             notes = extra + notes
         notes.append(QUALITY_NOTES[_band(quality)])
         return {"type": mtype, "side": side, "quality": round(quality),
+                "confidence": round(min(1.0, max(0.0, confidence)), 2),
                 "advice": notes[:3]}
 
     @staticmethod
     def _strike_quality(speed: float, extension: float) -> float:
         q = 45 + min(speed * 150, 32) + min(extension * 45, 20)
         return max(40, min(98, q))
+
+    @staticmethod
+    def _avg_score(frames: List[List[Dict[str, float]]]) -> float:
+        scores = [k.get("score", 0.0) for f in frames for k in f]
+        return sum(scores) / max(1, len(scores))
 
     # ---- arms: punches + guard -------------------------------------------------
     def _detect_arms(self, frames: List[List[Dict[str, float]]]) -> List[Dict[str, Any]]:
@@ -170,6 +257,7 @@ class MovementAnalyzer:
             dx = last[0] - first[0]
             dy = last[1] - first[1]
             dist = _speed(first, last)
+            conf = min(0.9, 0.5 + dist * 2.0)
 
             if dist < 0.05:
                 # No strike: check guard (wrist held high near the face).
@@ -190,7 +278,7 @@ class MovementAnalyzer:
             if shoulder:
                 extension = _speed(last, shoulder)
             quality = self._strike_quality(dist, extension)
-            results.append(self._detection(mtype, side, quality))
+            results.append(self._detection(mtype, side, quality, conf))
         return results
 
     # ---- legs: kicks -------------------------------------------------------------
@@ -207,6 +295,7 @@ class MovementAnalyzer:
             dist = _speed(first, last)
             if dist < 0.07:
                 continue
+            conf = min(0.9, 0.45 + dist * 1.5)
             if dy <= -0.06 and abs(dx) < abs(dy) * 2:
                 mtype = "front_kick" if dist > 0.13 else "knee_raise"
             elif abs(dx) >= 0.07 and abs(dy) < 0.09:
@@ -216,7 +305,63 @@ class MovementAnalyzer:
             hip_pt = _pt(frames[-1], hip)
             extension = _speed(last, hip_pt) if hip_pt else 0.0
             quality = self._strike_quality(dist, extension)
-            results.append(self._detection(mtype, side, quality))
+            results.append(self._detection(mtype, side, quality, conf))
+        return results
+
+    # ---- complex techniques -----------------------------------------------------
+    def _detect_complex(self, frames: List[List[Dict[str, float]]],
+                        torso: _TorsoState) -> List[Dict[str, Any]]:
+        results: List[Dict[str, Any]] = []
+        base_conf = 0.5 + self._avg_score(frames) * 0.4  # reward reliable keypoints
+
+        # ---- Superman punch: forward lean + both arms extend + a leg lifts ----
+        if torso.lean_delta <= -0.12 and torso.lean < 0.55:
+            both_wrists = (self._trajectory(frames, L_WRIST),
+                           self._trajectory(frames, R_WRIST))
+            if len(both_wrists[0]) >= 3 and len(both_wrists[1]) >= 3:
+                ext_l = _speed(both_wrists[0][0], both_wrists[0][-1])
+                ext_r = _speed(both_wrists[1][0], both_wrists[1][-1])
+                if ext_l > 0.07 and ext_r > 0.07:
+                    conf = min(0.95, base_conf + 0.2 + torso.lean * 0.5)
+                    results.append(self._detection(
+                        "superman_punch", "lead", 78, conf))
+
+        # ---- Spinning backfist: torso rotates fast / shoulder flip + whip -----
+        spin_arm = self._trajectory(frames, L_WRIST) + self._trajectory(frames, R_WRIST)
+        if (torso.shoulder_flip >= 0.9 or torso.spin > 0.12) and len(spin_arm) >= 3:
+            horiz = max(abs(p[0] - spin_arm[0][0]) for p in spin_arm[1:])
+            if horiz > 0.12:
+                conf = min(0.95, base_conf + 0.25 + min(0.3, torso.spin * 1.5))
+                results.append(self._detection("spinning_backfist", "rear", 76, conf))
+
+        # ---- Axe kick: ankle rises very high then drops fast ------------------
+        for side, ank in {"left": L_ANKLE, "right": R_ANKLE}.items():
+            traj = self._trajectory(frames, ank)
+            if len(traj) < 4:
+                continue
+            y_min = min(p[1] for p in traj)
+            i_min = min(range(len(traj)), key=lambda i: traj[i][1])
+            if y_min <= 0.32 and i_min < len(traj) - 1:
+                drop = traj[-1][1] - y_min
+                if drop > 0.12:
+                    conf = min(0.95, base_conf + 0.15 + min(0.3, drop * 1.5))
+                    results.append(self._detection("axe_kick", side, 75, conf))
+
+        # ---- Question-mark kick: ankle rises then sweeps laterally while up ----
+        for side, ank in {"left": L_ANKLE, "right": R_ANKLE}.items():
+            traj = self._trajectory(frames, ank)
+            if len(traj) < 4:
+                continue
+            y_min = min(p[1] for p in traj)
+            i_min = min(range(len(traj)), key=lambda i: traj[i][1])
+            if y_min <= 0.4 and i_min < len(traj) - 1:
+                tail = traj[i_min:]
+                if len(tail) >= 2:
+                    lat = abs(tail[-1][0] - tail[0][0])
+                    stays_up = all(p[1] < 0.5 for p in tail)
+                    if lat > 0.12 and stays_up:
+                        conf = min(0.95, base_conf + 0.15 + min(0.3, lat * 1.5))
+                        results.append(self._detection("question_mark_kick", side, 77, conf))
         return results
 
     # ---- stance / balance -----------------------------------------------------------
@@ -273,10 +418,8 @@ class CoachEngine:
                 self._strike_times.append(now)
                 latest_strike = d
             elif d.get("advice"):
-                # Guard / stance notes surface as general coach advice.
                 advice.append(d["advice"][0])
 
-        # Rotate technique-specific advice so it doesn't repeat every strike.
         if latest_strike:
             self.last = latest_strike
             idx = self._advice_idx.get(latest_strike["type"], 0)
@@ -286,12 +429,10 @@ class CoachEngine:
                 advice.append(tip)
                 self._advice_idx[latest_strike["type"]] = idx + 1
 
-        # Tempo (strikes per second over the recent window).
         if len(self._strike_times) >= 2:
             span = self._strike_times[-1] - self._strike_times[0]
             self._last_tempo = (len(self._strike_times) - 1) / max(span, 0.001)
 
-        # Milestone / combination coaching.
         if self.total_strikes and self.total_strikes % 3 == 0:
             advice.append("Nice rhythm — chain your strikes into combinations "
                           "(jab-cross, hook-kick).")
@@ -306,6 +447,7 @@ class CoachEngine:
                 "type": self.last["type"],
                 "side": self.last["side"],
                 "quality": self.last["quality"],
+                "confidence": self.last.get("confidence", 0.0),
                 "advice": self.last.get("advice", []),
             }
 

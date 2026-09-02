@@ -24,6 +24,7 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -43,6 +44,7 @@ from .camera_processor import (
     cv2_info,
     decode_jpeg_frame,
 )
+from .profiles import PROFILES
 from .engine import (
     MotionPoseEstimator,
     PurePythonCoEvolution,
@@ -50,6 +52,7 @@ from .engine import (
     PurePythonStyleEncoder,
 )
 from .coach import CoachEngine, MovementAnalyzer
+from .fatigue import FatigueTracker
 
 logger = logging.getLogger("hadin")
 logging.basicConfig(level=logging.INFO,
@@ -221,8 +224,11 @@ class AICore:
         return self._style_py.encode() if hasattr(self, "_style_py") else ([0.0] * 64, ["neutral"])
 
     def generate_opponent(self, athlete_pose: List[Dict[str, float]],
-                          latent: List[float], difficulty: float) -> List[Dict[str, float]]:
-        """Return a normalized opponent pose."""
+                          latent: List[float], difficulty: float,
+                          profile: str = "balanced") -> List[Dict[str, float]]:
+        """Return a normalized opponent pose shaped by the sparring profile."""
+        from .profiles import build_opponent
+
         if self.backend == "cpp" and self._opponent.is_ready():
             try:
                 op = self._opponent.generate(latent, difficulty)
@@ -233,7 +239,7 @@ class AICore:
                             for i in range(n)]
             except Exception as exc:  # noqa: BLE001
                 logger.warning("C++ opponent failed (%s); using Python.", exc)
-        return self._opponent_py.generate(athlete_pose, difficulty)
+        return build_opponent(athlete_pose, profile, difficulty)
 
     def coevolution_step(self, profile: Dict[str, Any], current: float) -> float:
         if self.backend == "cpp" and self._coevolution.is_ready():
@@ -272,6 +278,8 @@ class SessionManager:
             "style_tags": [],
             "movement": MovementAnalyzer(),   # martial-arts movement detection
             "coach": CoachEngine(),           # session coaching stats + advice
+            "fatigue": FatigueTracker(),      # fatigue score + recovery advice
+            "profile": "balanced",            # sparring-partner AI profile
         }
 
     def touch(self, client_id: str) -> Optional[Dict[str, Any]]:
@@ -295,6 +303,35 @@ class SessionManager:
 
 
 sessions = SessionManager()
+
+# Completed-session summaries (bounded), for the performance dashboard.
+HISTORY: List[Dict[str, Any]] = []
+MAX_HISTORY = 20
+
+
+def _record_history(client_id: str, sess: Optional[Dict[str, Any]]) -> None:
+    """Save a concise summary of a finished session for the dashboard."""
+    if not sess:
+        return
+    coach = sess.get("coach")
+    fatigue = sess.get("fatigue")
+    counts = getattr(coach, "counts", None) or {}
+    try:
+        fatigue_score = fatigue.score()["score"] if fatigue else 0
+    except Exception:  # noqa: BLE001
+        fatigue_score = 0
+    summary = {
+        "client_id": client_id,
+        "ended": round(time.time(), 1),
+        "duration_s": round(max(0.0, time.time() - sess.get("started", time.time()))),
+        "frames": sess.get("frames", 0),
+        "profile": sess.get("profile", "balanced"),
+        "techniques": counts,
+        "total_strikes": sess.get("_strikes_seen", 0),
+        "fatigue": fatigue_score,
+    }
+    HISTORY.append(summary)
+    del HISTORY[:-MAX_HISTORY]
 
 # In-memory athlete profile (persist to Redis in production).
 athlete_profile: Dict[str, Any] = {
@@ -365,21 +402,45 @@ async def process_frame(websocket: WebSocket, client_id: str,
         movements = sess["movement"].analyze()
         coach = sess["coach"].update(movements)
 
-    # Co-evolution drives difficulty.
-    sess["difficulty"] = ai_core.coevolution_step(athlete_profile,
-                                                  sess["difficulty"])
+        # Fatigue analysis: track stance stability each frame and feed each NEW
+        # strike once with a "snap" proxy (confidence x quality ~ explosive speed).
+        sess["fatigue"].observe_stance(norm)
+        prev = sess.get("_strikes_seen", 0)
+        total = coach.get("total_strikes", 0)
+        if total > prev:
+            latest = coach.get("last")
+            if latest:
+                snap = (latest.get("confidence", 0.5) * 0.5 +
+                        (latest.get("quality", 50) / 100.0) * 0.5)
+            else:
+                snap = 0.6
+            for _ in range(total - prev):
+                sess["fatigue"].observe_strike(snap)
+            sess["_strikes_seen"] = total
+    fatigue = sess["fatigue"].score()
 
-    # Opponent generation (pure-Python reflex by default). Sent as data only —
-    # the CLIENT draws the ghost overlay over the live video (toggleable).
+    # Co-evolution drives difficulty; the sparring profile applies its own bias.
+    from .profiles import difficulty_for
+
+    sess["difficulty"] = difficulty_for(
+        sess["profile"],
+        ai_core.coevolution_step(athlete_profile, sess["difficulty"]))
+
+    # Opponent generation, shaped by the selected sparring profile. Sent as
+    # data only — the CLIENT draws the ghost overlay over the live video.
     norm_pose = [{"x": k["x"] / w, "y": k["y"] / h, "score": k["score"]}
                  for k in draw_kps] if draw_kps else []
     opponent = ai_core.generate_opponent(norm_pose, sess["latent"],
-                                         sess["difficulty"])
+                                         sess["difficulty"],
+                                         profile=sess["profile"])
 
     feedback = build_feedback(sess, draw_kps)
     # Merge the coach's advice into the feedback shown to the trainee.
-    if coach.get("advice"):
-        feedback["notes"] = (coach["advice"] + feedback.get("notes", []))[:3]
+    notes = list(coach.get("advice", []))
+    if fatigue.get("advice"):
+        notes += fatigue["advice"]
+    if notes:
+        feedback["notes"] = (notes + feedback.get("notes", []))[:3]
     latency_ms = (time.perf_counter() - t0) * 1000.0
 
     # NOTE: no debug frame is sent back — the browser draws the overlays on
@@ -390,9 +451,11 @@ async def process_frame(websocket: WebSocket, client_id: str,
         "client_id": client_id,
         "keypoints": draw_kps,
         "opponent": opponent,
+        "profile": PROFILES.get(sess["profile"], PROFILES["balanced"])["label"],
         "feedback": feedback,
         "movements": movements,
         "coach": coach,
+        "fatigue": fatigue,
         "difficulty": round(sess["difficulty"], 2),
         "latency_ms": round(latency_ms, 2),
         "backend": ai_core.backend,
@@ -417,7 +480,17 @@ async def handle_json(websocket: WebSocket, client_id: str, text: str) -> None:
             ai_core._style_py.reset()
             sess["movement"].reset()
             sess["coach"].reset()
+            sess["fatigue"].reset()
+            sess["_strikes_seen"] = 0
         await websocket.send_json({"type": "reset_ack", "difficulty": 0.4})
+    elif msg_type == "set_profile":
+        from .profiles import PROFILE_NAMES
+        name = str(data.get("profile", ""))
+        if name in PROFILE_NAMES and sess:
+            sess["profile"] = name
+            await websocket.send_json({"type": "profile_ack", "profile": name})
+        else:
+            await websocket.send_json({"type": "error", "message": f"Unknown profile: {name}"})
     elif msg_type == "feedback_text":
         await websocket.send_json({"type": "feedback",
                                    "message": data.get("text", "")})
@@ -448,8 +521,72 @@ async def api_stats(request) -> JSONResponse:
         "backend": ai_core.backend,
         "sessions": sessions.all_sessions(),
         "profile": athlete_profile,
+        "profiles": {k: v["label"] for k, v in PROFILES.items()},
         "latency_target_ms": 50 if ai_core.backend == "cpp" else 120,
     })
+
+
+async def api_history(request) -> JSONResponse:
+    return JSONResponse({
+        "history": list(HISTORY),
+        "improvement": _improvement_suggestions(),
+    })
+
+
+def _improvement_suggestions() -> List[str]:
+    """Derive personalized suggestions from recent session history."""
+    if not HISTORY:
+        return ["Complete a session to receive personalized improvement tips."]
+    total = {"jab": 0, "cross": 0, "hook": 0, "uppercut": 0,
+             "front_kick": 0, "roundhouse_kick": 0}
+    best: Optional[Tuple[str, int]] = None
+    for h in HISTORY:
+        for t, c in (h.get("techniques") or {}).items():
+            if t in total:
+                total[t] += c
+    for t, c in total.items():
+        if c and (best is None or c > best[1]):
+            best = (t, c)
+    tips = []
+    if best:
+        tips.append(f"Your most-used technique is {best[0].replace('_', ' ')} "
+                    f"({best[1]} reps) — drill it into sharper, faster reps.")
+    avg_fatigue = sum(h.get("fatigue", 0) for h in HISTORY) / len(HISTORY)
+    if avg_fatigue > 60:
+        tips.append("Sessions end quite fatigued — add short breaks between rounds.")
+    elif avg_fatigue < 30:
+        tips.append("Push your intensity a little — your fatigue stays low.")
+    if len(HISTORY) >= 2:
+        tips.append("Try a different sparring profile (e.g. counter-puncher) to "
+                    "develop your defence.")
+    return tips[:3]
+
+
+async def api_session(request) -> JSONResponse:
+    """Live view of one active session (or the last matching history entry)."""
+    client_id = request.path_params.get("client_id", "")
+    sess = sessions.sessions.get(client_id)
+    if sess:
+        coach = sess.get("coach")
+        fatigue = sess.get("fatigue")
+        live = {
+            "live": True,
+            "profile": sess.get("profile"),
+            "frames": sess.get("frames", 0),
+            "difficulty": round(sess.get("difficulty", 0.4), 2),
+            "techniques": dict(getattr(coach, "counts", None) or {}),
+            "total_strikes": sess.get("_strikes_seen", 0),
+            "style_tags": sess.get("style_tags", []),
+        }
+        try:
+            live["fatigue"] = fatigue.score() if fatigue else {"score": 0}
+        except Exception:  # noqa: BLE001
+            live["fatigue"] = {"score": 0}
+        return JSONResponse(live)
+    for h in reversed(HISTORY):
+        if h.get("client_id") == client_id:
+            return JSONResponse({**h, "live": False})
+    return JSONResponse({"live": False, "error": "session not found"}, status_code=404)
 
 
 async def ws_endpoint(websocket: WebSocket, **kwargs: Any) -> None:
@@ -462,35 +599,51 @@ async def ws_endpoint(websocket: WebSocket, **kwargs: Any) -> None:
     await websocket.accept()
     sessions.create(client_id)
     logger.info("WS connect: %s", client_id)
+    sess = sessions.sessions[client_id]
     try:
         await websocket.send_json({
             "type": "hello",
             "backend": ai_core.backend,
+            "profile": sess["profile"],
+            "profiles": list(PROFILES.keys()),
             "message": "HADIN-COMBAT ready. Begin your session.",
         })
+
+        # Client keep-alive every 20s so proxies/timeouts don't drop the socket.
+        async def _keepalive():
+            try:
+                while True:
+                    await asyncio.sleep(20)
+                    await websocket.send_json({"type": "ping", "t": time.time()})
+            except Exception:  # noqa: BLE001
+                return
+        ka = asyncio.create_task(_keepalive())
 
         while True:
             message = await websocket.receive()
 
-            if "bytes" in message and message["bytes"]:
-                sess = sessions.touch(client_id)
-                frame = decode_jpeg_frame(message["bytes"])
-                if frame is None or sess is None:
-                    continue
-                await process_frame(websocket, client_id, sess, frame)
-
-            elif "text" in message and message["text"]:
-                await handle_json(websocket, client_id, message["text"])
+            try:  # isolate one bad frame/message so it can't kill the session
+                if "bytes" in message and message["bytes"]:
+                    sess = sessions.touch(client_id)
+                    frame = decode_jpeg_frame(message["bytes"])
+                    if frame is None or sess is None:
+                        continue
+                    await process_frame(websocket, client_id, sess, frame)
+                elif "text" in message and message["text"]:
+                    await handle_json(websocket, client_id, message["text"])
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("frame error for %s (continuing): %s", client_id, exc)
 
     except WebSocketDisconnect:
         logger.info("WS disconnect: %s", client_id)
-        sessions.sessions.pop(client_id, None)
     except Exception as exc:  # noqa: BLE001
         logger.exception("WS error for %s: %s", client_id, exc)
+    finally:
         try:
-            await websocket.close(code=1011)
+            ka.cancel()
         except Exception:  # noqa: BLE001
             pass
+        _record_history(client_id, sessions.sessions.pop(client_id, None))
 
 
 # ---- Starlette application (FastAPI-free: zero compiled dependencies) ----------
@@ -500,6 +653,8 @@ _routes = [
     Route("/", endpoint=index, methods=["GET"]),  # fallback index
     Route("/api/health", endpoint=api_health, methods=["GET"]),
     Route("/api/stats", endpoint=api_stats, methods=["GET"]),
+    Route("/api/history", endpoint=api_history, methods=["GET"]),
+    Route("/api/session/{client_id}", endpoint=api_session, methods=["GET"]),
     WebSocketRoute("/ws/{client_id}", endpoint=ws_endpoint),
 ]
 # Serve the website (index.html + css/js) at the root so relative asset
