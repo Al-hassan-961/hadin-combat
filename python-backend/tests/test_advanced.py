@@ -7,7 +7,7 @@
 profiles."""
 
 from app.coach import MovementAnalyzer
-from app.fatigue import FatigueTracker, stance_wobble
+from app.analytics import FatigueTracker, stance_wobble
 from app.profiles import build_opponent, difficulty_for, PROFILES
 
 

@@ -1,0 +1,32 @@
+{
+  "balanced": {
+    "label": "Balanced", "emoji": "🥊",
+    "difficulty_boost": 0.0, "aggression": 0.5,
+    "jitter": 0.02, "pressure": 0.0, "guard": 0.0,
+    "desc": "Rounds out every style — adapts to whatever you throw."
+  },
+  "aggressive": {
+    "label": "Aggressive", "emoji": "🔥",
+    "difficulty_boost": 0.15, "aggression": 1.0,
+    "jitter": 0.045, "pressure": 0.25, "guard": 0.2,
+    "desc": "Swarm fighter — pushes forward and throws constant combinations."
+  },
+  "counter_puncher": {
+    "label": "Counter-Puncher", "emoji": "🛡️",
+    "difficulty_boost": -0.05, "aggression": 0.15,
+    "jitter": 0.012, "pressure": -0.15, "guard": 0.6,
+    "desc": "Patience personified — slips, then snaps back after your miss."
+  },
+  "defensive": {
+    "label": "Defensive", "emoji": "🧱",
+    "difficulty_boost": -0.12, "aggression": 0.05,
+    "jitter": 0.008, "pressure": 0.05, "guard": 0.9,
+    "desc": "High guard, tight shell — you must open it up with setups."
+  },
+  "pressure_fighter": {
+    "label": "Pressure Fighter", "emoji": "🚀",
+    "difficulty_boost": 0.08, "aggression": 0.85,
+    "jitter": 0.03, "pressure": 0.35, "guard": 0.15,
+    "desc": "Walks you down behind a busy jab — relentless forward pressure."
+  }
+}

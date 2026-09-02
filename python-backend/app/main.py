@@ -44,7 +44,7 @@ from .camera_processor import (
     cv2_info,
     decode_jpeg_frame,
 )
-from .profiles import PROFILES
+from .profiles import PROFILES, load_profile_preference
 from .engine import (
     MotionPoseEstimator,
     PurePythonCoEvolution,
@@ -52,7 +52,7 @@ from .engine import (
     PurePythonStyleEncoder,
 )
 from .coach import CoachEngine, MovementAnalyzer
-from .fatigue import FatigueTracker
+from .analytics import FatigueTracker
 
 logger = logging.getLogger("hadin")
 logging.basicConfig(level=logging.INFO,
@@ -304,6 +304,12 @@ ai_core._coev_py = PurePythonCoEvolution()
 # ---------------------------------------------------------------------------
 # Session management
 # ---------------------------------------------------------------------------
+def _saved_profile() -> str:
+    """The user's saved sparring profile (from data/preferences.json)."""
+    try:
+        return load_profile_preference()
+    except Exception:  # noqa: BLE001
+        return "balanced"
 class SessionManager:
     def __init__(self) -> None:
         self.sessions: Dict[str, Dict[str, Any]] = {}
@@ -320,7 +326,9 @@ class SessionManager:
             "movement": MovementAnalyzer(),   # martial-arts movement detection
             "coach": CoachEngine(),           # session coaching stats + advice
             "fatigue": FatigueTracker(),      # fatigue score + recovery advice
-            "profile": "balanced",            # sparring-partner AI profile
+            # Sparring-partner AI profile: start from the user's saved
+            # preference (JSON), defaulting to "balanced".
+            "profile": _saved_profile(),
         }
 
     def touch(self, client_id: str) -> Optional[Dict[str, Any]]:
@@ -534,10 +542,11 @@ async def handle_json(websocket: WebSocket, client_id: str, text: str) -> None:
             sess["_strikes_seen"] = 0
         await websocket.send_json({"type": "reset_ack", "difficulty": 0.4})
     elif msg_type == "set_profile":
-        from .profiles import PROFILE_NAMES
+        from .profiles import PROFILE_NAMES, save_profile_preference
         name = str(data.get("profile", ""))
         if name in PROFILE_NAMES and sess:
             sess["profile"] = name
+            save_profile_preference(name)   # remember for future sessions (JSON)
             await websocket.send_json({"type": "profile_ack", "profile": name})
         else:
             await websocket.send_json({"type": "error", "message": f"Unknown profile: {name}"})
