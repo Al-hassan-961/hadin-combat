@@ -145,8 +145,11 @@ Health check: `curl http://127.0.0.1:8000/api/health` → `{"status":"ok","versi
 > - **Browser can't connect** → ensure you're on the same network, the phone's Wi‑Fi
 >   isolation is off, and the firewall allows port `8000`.
 > - **QR not shown** → `pkg install qrencode` then restart `run.sh`.
-> - **Camera denied** → allow camera permission in your browser, and use HTTPS or
->   `localhost` (cameras are blocked on insecure origins for non-local hosts).
+> - **"Camera unavailable" even with permission granted** → browsers block the
+>   camera on plain `http://` for non-localhost addresses (a *secure-context*
+>   rule). Fix: open **`http://127.0.0.1:8000` on this phone**, or run the
+>   server with HTTPS for other devices: `bash scripts/run.sh --ssl` (accept
+>   the self-signed certificate warning once).
 > - **See `backend: opencv`** → that's the OpenCV motion fallback (works out of the
 >   box). `mediapipe`/`cpp` appear when those are installed.
 

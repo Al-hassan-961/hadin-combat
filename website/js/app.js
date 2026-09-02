@@ -92,8 +92,54 @@
     }
 
     // ---- Camera -----------------------------------------------------------
+    function isSecureOrigin() {
+        // getUserMedia only works on secure origins: https, or http on
+        // localhost/127.0.0.1. Plain http over a LAN IP is BLOCKED by browsers
+        // even when the user granted camera permission.
+        return window.isSecureContext ||
+            location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    }
+
+    function showCameraError(err) {
+        let title = '📵 Camera unavailable';
+        let msg = '';
+
+        if (!isSecureOrigin()) {
+            title = '🔒 Camera needs a secure page';
+            msg =
+                'Your browser blocks the camera on plain http for non-localhost ' +
+                'addresses, even with permission granted.<br><br>' +
+                '• On THIS phone, open <b>http://127.0.0.1:8000</b> instead.<br>' +
+                '• For other devices, start the server with HTTPS: ' +
+                '<b>bash scripts/run.sh --ssl</b> (accept the certificate warning).';
+        } else if (err.name === 'NotAllowedError' || err.message === 'no-getusermedia') {
+            msg =
+                'Camera permission denied. Tap the camera/🔒 icon in the address ' +
+                'bar, choose <b>Allow</b>, then press Start again.';
+        } else if (err.name === 'NotFoundError') {
+            msg = 'No camera was found on this device.';
+        } else if (err.name === 'NotReadableError') {
+            msg = 'The camera is in use by another app. Close it and retry.';
+        } else if (err.name === 'SecurityError') {
+            msg =
+                'Camera blocked by browser policy. Use <b>http://127.0.0.1:8000</b> ' +
+                'or HTTPS (<b>bash scripts/run.sh --ssl</b>).';
+        } else {
+            msg = 'Camera error: ' + (err.message || err.name || 'unknown');
+        }
+
+        els.stageMessage.innerHTML =
+            '<div class="msg-box"><span class="msg-emoji">' +
+            title.split(' ')[0] + '</span>' +
+            '<p class="msg-title">' + title + '</p>' +
+            '<p>' + msg + '</p></div>';
+    }
+
     async function startCamera() {
         try {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error('no-getusermedia');
+            }
             stream = await navigator.mediaDevices.getUserMedia({
                 video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
                 audio: false,
@@ -102,9 +148,7 @@
             await els.video.play();
             els.stageMessage.style.display = 'none';
         } catch (err) {
-            els.stageMessage.innerHTML =
-                '<div class="msg-box"><span class="msg-emoji">📵</span>' +
-                '<p>Camera unavailable. Grant camera permission.</p></div>';
+            showCameraError(err);
             console.error(err);
         }
     }
@@ -330,6 +374,12 @@
     setupConnectBar();
     pollHealth();
     setInterval(pollHealth, 10000);
+
+    // Warn up-front if the camera will be blocked by browser policy (plain
+    // http on a non-localhost address).
+    if (!isSecureOrigin()) {
+        showCameraError({ name: 'SecurityError' });
+    }
 
     // Initial connection attempt.
     connect();

@@ -24,14 +24,19 @@ HOST="0.0.0.0"
 PORT="8000"
 OPEN=0
 QR=1
+SSL=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --host)   HOST="$2"; shift 2 ;;
         --port)   PORT="$2"; shift 2 ;;
+        --ssl)    SSL=1; shift ;;
         --open)   OPEN=1; shift ;;
         --no-qr)  QR=0; shift ;;
         -h|--help)
-            echo "Usage: bash scripts/run.sh [--port 8000] [--host 0.0.0.0] [--open] [--no-qr]"
+            echo "Usage: bash scripts/run.sh [--port 8000] [--host 0.0.0.0] [--ssl] [--open] [--no-qr]"
+            echo "  --ssl   serve HTTPS (self-signed cert) so the camera works"
+            echo "          on OTHER devices (browsers block getUserMedia on"
+            echo "          plain http for non-localhost addresses)."
             exit 0 ;;
         *) shift ;;
     esac
@@ -96,8 +101,38 @@ detect_ip() {
     echo "$ip"
 }
 LOCAL_IP="$(detect_ip)"
-LAN_URL="http://${LOCAL_IP}:${PORT}"
-LOCAL_URL="http://127.0.0.1:${PORT}"
+
+# ---------- HTTPS (self-signed cert) ---------------------------------------------
+SCHEME="http"
+SSL_ARGS=()
+if [ "$SSL" -eq 1 ]; then
+    SCHEME="https"
+    CERTS_DIR="$ROOT/certs"
+    mkdir -p "$CERTS_DIR"
+    CERT="$CERTS_DIR/cert.pem"
+    KEY="$CERTS_DIR/key.pem"
+    if [ ! -f "$CERT" ] || [ ! -f "$KEY" ]; then
+        info "Generating a self-signed certificate (valid 1 year)..."
+        if command -v openssl >/dev/null 2>&1; then
+            openssl req -x509 -newkey rsa:2048 -keyout "$KEY" -out "$CERT" \
+                -days 365 -nodes -subj "/CN=hadin-combat" >/dev/null 2>&1 \
+                || { fail "openssl failed"; exit 1; }
+        else
+            # Pure-Python fallback (cryptography may not be installed; use ssl).
+            "$ROOT/.venv/bin/python" - "$CERT" "$KEY" <<'PYEOF' 2>/dev/null \
+                || { fail "Cannot generate cert. Install openssl: pkg install openssl-tool"; exit 1; }
+import ssl, sys
+print("python ssl cert generation requires the 'cryptography' lib; install openssl-tool instead", file=sys.stderr)
+sys.exit(1)
+PYEOF
+        fi
+        chmod 600 "$KEY"
+        ok "Certificate ready at $CERT"
+    fi
+    SSL_ARGS=(--ssl-certfile "$CERT" --ssl-keyfile "$KEY")
+fi
+LAN_URL="${SCHEME}://${LOCAL_IP}:${PORT}"
+LOCAL_URL="${SCHEME}://127.0.0.1:${PORT}"
 
 # ---------- system deps check (Termux) ---------------------------------------------
 ensure_termux_system_deps
@@ -122,6 +157,10 @@ echo -e "       ${C_CYAN}${LOCAL_URL}${C_RESET}"
 echo
 echo -e "${C_BOLD}   ▸ Other devices on your Wi-Fi:${C_RESET}"
 echo -e "       ${C_CYAN}${LAN_URL}${C_RESET}"
+echo
+echo -e "${C_DIM}   📷 Camera tip: browsers block getUserMedia on plain http for"
+echo -e "   non-localhost addresses. On this phone use ${C_CYAN}${LOCAL_URL}${C_RESET}${C_DIM},"
+echo -e "   or restart with ${C_CYAN}--ssl${C_RESET}${C_DIM} for HTTPS on other devices.${C_RESET}"
 echo
 
 # ---------- QR code for the LAN URL (scan with another phone) ----------------------
@@ -150,6 +189,6 @@ fi
 
 # ---------- start server --------------------------------------------------------------
 cd "$ROOT/python-backend"
-info "Starting HADIN-COMBAT on ${HOST}:${PORT} ..."
+info "Starting HADIN-COMBAT on ${HOST}:${PORT} (${SCHEME}) ..."
 echo
-exec uvicorn app.main:app --host "$HOST" --port "$PORT"
+exec uvicorn app.main:app --host "$HOST" --port "$PORT" "${SSL_ARGS[@]}"
