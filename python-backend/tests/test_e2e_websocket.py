@@ -121,6 +121,23 @@ def test_health(server):
     assert data["backend"] == "opencv"
 
 
+def test_static_assets_served(server):
+    """The frontend uses relative paths (css/style.css, js/app.js); they must
+    resolve against the site root or the app can't start (JS never loads)."""
+    with urllib.request.urlopen(f"http://127.0.0.1:{server}/", timeout=10) as r:
+        assert r.status == 200
+        assert "text/html" in r.headers.get("content-type", "")
+        html = r.read().decode()
+        assert "HADIN" in html
+    for path, ctype in (("/css/style.css", "text/css"),
+                        ("/js/app.js", "javascript")):
+        with urllib.request.urlopen(f"http://127.0.0.1:{server}{path}",
+                                    timeout=10) as r:
+            assert r.status == 200, f"{path} not served"
+            assert ctype in r.headers.get("content-type", ""), path
+            assert len(r.read()) > 0
+
+
 # ---------------------------------------------------------------------------
 # WebSocket handler (direct, deterministic)
 # ---------------------------------------------------------------------------

@@ -486,15 +486,19 @@ async def ws_endpoint(websocket: WebSocket, **kwargs: Any) -> None:
 
 
 # ---- Starlette application (FastAPI-free: zero compiled dependencies) ----------
+# NOTE: the frontend uses RELATIVE asset paths (css/style.css, js/app.js), so
+# the static website must be served at the SITE ROOT, not under /static.
 _routes = [
-    Route("/", endpoint=index, methods=["GET"]),
+    Route("/", endpoint=index, methods=["GET"]),  # fallback index
     Route("/api/health", endpoint=api_health, methods=["GET"]),
     Route("/api/stats", endpoint=api_stats, methods=["GET"]),
     WebSocketRoute("/ws/{client_id}", endpoint=ws_endpoint),
 ]
-# Mount static assets when a local copy exists.
+# Serve the website (index.html + css/js) at the root so relative asset
+# paths resolve. html=True also serves index.html for "/".
 if STATIC_DIR.exists():
-    _routes.append(Mount("/static", app=StaticFiles(directory=STATIC_DIR), name="static"))
+    _routes.append(Mount("/", app=StaticFiles(directory=STATIC_DIR, html=True),
+                         name="static"))
 
 app = Starlette(routes=_routes)
 
