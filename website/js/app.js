@@ -102,19 +102,24 @@
 
         ws.onopen = () => {
             reconnectDelay = 800;             // reset backoff on success
+            logHADIN('ws', 'OPEN ' + url);
             setPill('connected', 'cpp');
             addFeedback('Session connected. Ready to train.');
         };
 
         ws.onmessage = (event) => onMessage(event.data);
 
-        ws.onclose = () => {
+        ws.onclose = (ev) => {
+            logHADIN('ws', 'CLOSED code=' + ev.code + ' reason=' + ev.reason);
             setPill('reconnecting…', 'none');
             setTimeout(connect, reconnectDelay);
             reconnectDelay = Math.min(8000, reconnectDelay * 1.8);  // backoff
         };
 
-        ws.onerror = () => ws.close();
+        ws.onerror = (err) => {
+            console.error('[HADIN:ws] error', err);
+            ws.close();
+        };
     }
 
     function onMessage(raw) {
@@ -128,13 +133,25 @@
         if (msg.type === 'ping') return;          // server keep-alive
 
         if (msg.type === 'hello') {
+            logHADIN('ws', 'hello received backend=' + msg.backend + ' profiles=' + (msg.profiles || []).length);
             setPill(msg.backend, msg.backend);
             addFeedback(msg.message);
             if (msg.profiles) initProfileChips(msg.profiles);
             return;
         }
         if (msg.type === 'frame') {
-            renderFrame(msg);
+            _frameLogCount++;
+            if (_frameLogCount === 1 || _frameLogCount % 90 === 0) {
+                logHADIN('frame', '#' + _frameLogCount,
+                    'analysis?', !!msg.analysis,
+                    'keypoints?', !!(msg.keypoints && msg.keypoints.length),
+                    'backend', msg.backend);
+            }
+            try {
+                renderFrame(msg);
+            } catch (err) {
+                console.error('[HADIN:frame] render error', err);
+            }
             return;
         }
         if (msg.type === 'feedback') {
@@ -330,7 +347,14 @@
             }
         }
         if (msg.fatigue) updateFatigue(msg.fatigue);
-        if (msg.analysis) updateLivePanel(msg.analysis);
+        if (msg.analysis) {
+            try {
+                updateLivePanel(msg.analysis);
+                updateAnalysis(msg.analysis, msg.coach);   // canonical ids
+            } catch (err) {
+                console.error('[HADIN:ui] updateAnalysis error', err);
+            }
+        }
     }
 
     function drawSkeleton(kps) {
@@ -546,6 +570,101 @@
             }
         }
     }
+
+    // ==========================================================================
+    // ANALYSIS DEBUG & CANONICAL UI (strikeCount, fatigueScore, currentStrike,
+    // sessionTimer, coachingTip, strikeHistory, accuracyDisplay, performanceScore)
+    // ==========================================================================
+    const HADIN_DEBUG = new URLSearchParams(location.search).has('debug') ||
+        localStorage.getItem('hc.debug') === '1';
+    function logHADIN(tag) {
+        if (!HADIN_DEBUG) return;
+        const args = [].slice.call(arguments, 1);
+        console.log('%c[HADIN:' + tag + ']', 'color:#06f7f7;font-weight:bold', ...args);
+    }
+    let _frameLogCount = 0;
+    let _strikeHistory = [];
+    let _lastMock = null;
+
+    // Canonical writer — fills the #strikeCount/#fatigueScore/... elements.
+    function updateAnalysis(a, coach) {
+        if (!a) { logHADIN('analysis', 'updateAnalysis called with NO data'); return; }
+        const g = (id) => document.getElementById(id);
+        const strike = a.strike || {};
+        const strikeLabel = strike.type && MOVE_LABELS[strike.type]
+            ? MOVE_LABELS[strike.type] : '—';
+
+        if (g('currentStrike')) g('currentStrike').textContent = strikeLabel;
+        if (g('strikeCount')) g('strikeCount').textContent =
+            (coach && coach.total_strikes) || 0;
+        if (g('fatigueScore')) g('fatigueScore').textContent = a.fatigue_score || 0;
+        if (g('accuracyDisplay')) g('accuracyDisplay').textContent =
+            strike.quality ? strike.quality + '%' : '—';
+        if (g('performanceScore')) g('performanceScore').textContent =
+            (a.performance != null ? a.performance : '—');
+        if (g('sessionTimer')) g('sessionTimer').textContent =
+            fmtClock(a.elapsed_s) + (a.phase === 'rest' ? ' (rest)' : '');
+        if (g('coachingTip')) g('coachingTip').textContent = a.tip || '—';
+
+        // Strike history (last 6 unique techniques).
+        if (strike.type && strike.type !== _strikeHistory[_strikeHistory.length - 1]) {
+            _strikeHistory.push(MOVE_LABELS[strike.type] || strike.type);
+            if (_strikeHistory.length > 6) _strikeHistory.shift();
+            if (g('strikeHistory')) {
+                g('strikeHistory').innerHTML = _strikeHistory
+                    .map((s) => '<span class="chip">' + s + '</span>').join('');
+            }
+        }
+        logHADIN('analysis', 'strike=' + (strike.type || 'none') +
+            ' conf=' + (strike.confidence_pct != null ? strike.confidence_pct + '%' : 'n/a') +
+            ' fatigue=' + (a.fatigue_score != null ? a.fatigue_score : 'n/a') +
+            ' speed=' + (a.speed_band || 'n/a'));
+    }
+
+    // Global error surfacing — console + on-screen toast.
+    window.addEventListener('error', (ev) => {
+        console.error('[HADIN:uncaught]', ev.message, ev.error);
+        if (ev.error) {
+            try { toast('⚠ ' + (ev.message || 'script error'), '🚨'); } catch (_) { /* noop */ }
+        }
+    });
+
+    // --------------------------------------------------------------------------
+    // MOCK DATA GENERATOR — proves the UI works without a backend.
+    // Enable with:  ?mock=1   (or call window.startMockData())
+    // --------------------------------------------------------------------------
+    let _mockTimer = null;
+    function mockTick() {
+        const types = ['jab', 'cross', 'hook', 'uppercut', 'front_kick', 'roundhouse_kick'];
+        const t = types[Math.floor(Math.random() * types.length)];
+        const fatigue = Math.min(100, Math.max(0,
+            Math.round(20 + Date.now() / 1000 % 40)));
+        const data = {
+            strike: { type: t, confidence_pct: 60 + Math.floor(Math.random() * 38), quality: 55 + Math.floor(Math.random() * 40) },
+            fatigue_score: fatigue, fatigue_level: fatigue < 30 ? 'fresh' : fatigue < 60 ? 'moderate' : 'fatigued',
+            profile: 'Aggressive', elapsed_s: (Date.now() / 1000) % 600,
+            round: 1, phase: 'round', phase_remain: 120,
+            speed_band: ['slow', 'medium', 'fast'][Math.floor(Math.random() * 3)],
+            tip: 'MOCK tip: keep your guard up and breathe.',
+            action: (t[0].toUpperCase() + t.slice(1)) + ' thrown — good form! (mock)',
+        };
+        updateLivePanel(data);
+        updateAnalysis(data, { total_strikes: 12 });
+        const tip = document.getElementById('liveTip');
+        if (tip) tip.textContent = '💬 ' + data.tip;
+    }
+    function startMockData() {
+        if (_mockTimer) return;
+        console.log('%c[HADIN:MOCK] feeding fake analysis every 2s', 'color:#fbbf24');
+        mockTick();
+        _mockTimer = setInterval(mockTick, 2000);
+    }
+    function stopMockData() {
+        if (_mockTimer) { clearInterval(_mockTimer); _mockTimer = null; }
+    }
+    window.startMockData = startMockData;
+    window.stopMockData = stopMockData;
+    if (new URLSearchParams(location.search).has('mock')) startMockData();
 
     // ---- MATCH SUMMARY MODAL --------------------------------------------------
     // ---- MATCH SUMMARY MODAL (class-based open/close with fade) -------------

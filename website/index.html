@@ -112,6 +112,27 @@
                     </div>
                     <div class="live-action" id="liveAction">Press Start to begin your session.</div>
                     <div class="live-tip" id="liveTip">Your AI coach is warming up…</div>
+
+                    <!-- Canonical analysis readout (strikeCount etc.) -->
+                    <div class="live-row">
+                        <div class="live-cell"><span class="live-label">Strikes</span>
+                            <span class="live-big" id="strikeCount">0</span></div>
+                        <div class="live-cell"><span class="live-label">Accuracy</span>
+                            <span class="live-big" id="accuracyDisplay">—</span></div>
+                        <div class="live-cell"><span class="live-label">Fatigue</span>
+                            <span class="live-big" id="fatigueScore">0</span></div>
+                        <div class="live-cell"><span class="live-label">Performance</span>
+                            <span class="live-big" id="performanceScore">—</span></div>
+                    </div>
+                    <div class="live-row">
+                        <div class="live-cell"><span class="live-label">Current strike</span>
+                            <span class="live-big" id="currentStrike">—</span></div>
+                        <div class="live-cell"><span class="live-label">Session timer</span>
+                            <span class="live-big" id="sessionTimer">0:00</span></div>
+                        <div class="live-cell" style="flex:2"><span class="live-label">Coaching tip</span>
+                            <span class="live-big" id="coachingTip" style="font-size:.85rem;font-weight:500">—</span></div>
+                    </div>
+                    <div class="coach-counts" id="strikeHistory"></div>
                 </section>
 
                 <!-- COACH PANEL -->

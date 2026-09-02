@@ -618,6 +618,12 @@ async def process_frame(websocket: WebSocket, client_id: str,
         "latency_ms": round(latency_ms, 2),
         "backend": ai_core.backend,
     }
+    # Debug aid: with HADIN_DEBUG=1 the server logs ~every 20th frame so you
+    # can confirm analysis is being produced and sent (check uvicorn output).
+    if os.getenv("HADIN_DEBUG") and sess["frames"] % 20 == 0:
+        logger.info("frame#%s kps=%d analysis=yes fatigue=%s speed=%s backend=%s",
+                    sess["frames"], len(draw_kps),
+                    analysis["fatigue_score"], analysis["speed_band"], ai_core.backend)
     await websocket.send_json(payload)
 
 
