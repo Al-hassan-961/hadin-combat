@@ -77,9 +77,41 @@
             <ul class="feedback-list" id="improvementList"></ul>
         </section>
 
-        <!-- Recent sessions -->
+        <!-- Video upload & analysis -->
         <section class="panel">
-            <h2>🕘 Recent sessions</h2>
+            <h2>🎬 Upload &amp; analyse a sparring video</h2>
+            <p class="card-label" style="margin-bottom:8px">MP4 · MOV · AVI — analysed offline with the same AI coach.</p>
+            <input type="file" id="videoFile" accept="video/mp4,video/quicktime,video/x-msvideo,video/*" class="file-input" />
+            <div class="progress-track" id="videoProgressTrack" hidden>
+                <div class="progress-fill" id="videoProgressFill" style="width:0%"></div>
+                <span class="progress-pct" id="videoProgressPct">0%</span>
+            </div>
+            <div class="card-label" id="videoStatus">Choose a video to start.</div>
+            <div id="videoError" class="live-tip" style="color:var(--accent)"></div>
+
+            <!-- Video analysis result (shown when done) -->
+            <div id="videoResult" hidden>
+                <div class="cards">
+                    <div class="card"><div class="card-num" id="vidStrikes">0</div><div class="card-label">Strikes</div></div>
+                    <div class="card"><div class="card-num" id="vidAccuracy">0%</div><div class="card-label">Accuracy</div></div>
+                    <div class="card"><div class="card-num" id="vidPerf">0</div><div class="card-label">Performance</div></div>
+                    <div class="card"><div class="card-num" id="vidFatigue">0</div><div class="card-label">Final fatigue</div></div>
+                </div>
+                <div class="sum-stats">
+                    <span id="vidMost">Most used: —</span>
+                    <span id="vidReaction">Reaction: —</span>
+                    <span id="vidSuggestions">—</span>
+                </div>
+                <h3 class="sum-head">🕒 Timeline — click to see the strike at that moment</h3>
+                <canvas id="videoTimeline" width="340" height="90"></canvas>
+                <input type="range" id="videoScrub" min="0" max="100" value="0" style="width:100%" />
+                <div class="card-label" id="videoScrubInfo">—</div>
+            </div>
+        </section>
+
+        <!-- Recent sessions (live + video history) -->
+        <section class="panel">
+            <h2>🕘 Session history</h2>
             <ul class="session-list" id="sessionList"></ul>
         </section>
     </main>

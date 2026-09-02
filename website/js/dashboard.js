@@ -157,13 +157,16 @@
 
         // ---- Recent sessions ------------------------------------------------------
         els.sessionsList.innerHTML = '';
-        history.slice().reverse().slice(0, 6).forEach((h) => {
+        history.slice().reverse().slice(0, 8).forEach((h) => {
             const li = document.createElement('li');
-            const t = TECHNIQUES.reduce((a, k) => a + (h.techniques?.[k] || 0), 0);
-            const when = new Date((h.ended || 0) * 1000).toLocaleTimeString([], {
-                hour: '2-digit', minute: '2-digit' });
-            li.textContent = `${when} · ${PROFILE_PRETTY[h.profile] || h.profile} · ` +
-                `${t} strikes · fatigue ${h.fatigue || 0}`;
+            const src = h.source === 'video' ? '🎬 ' : '🥊 ';
+            const when = new Date((h.ended || 0) * 1000).toLocaleString([], {
+                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+            const acc = h.accuracy_pct !== undefined ? ` · acc ${h.accuracy_pct}%` : '';
+            const perf = h.performance !== undefined ? ` · perf ${h.performance}` : '';
+            li.textContent = `${src}${h.title || (h.source === 'video' ? 'Video' : 'Live')} · ` +
+                `${when} · ${PROFILE_PRETTY[h.profile] || h.profile} · ` +
+                `${h.total_strikes || 0} strikes${acc}${perf} · fatigue ${h.fatigue || 0}`;
             els.sessionsList.appendChild(li);
         });
     }
@@ -171,5 +174,120 @@
     document.addEventListener('DOMContentLoaded', () => {
         refresh();
         setInterval(refresh, 4000);
+    });
+
+    // ---- Video upload & offline analysis ------------------------------------
+    const ve = {
+        file: document.getElementById('videoFile'),
+        track: document.getElementById('videoProgressTrack'),
+        fill: document.getElementById('videoProgressFill'),
+        pct: document.getElementById('videoProgressPct'),
+        status: document.getElementById('videoStatus'),
+        error: document.getElementById('videoError'),
+        result: document.getElementById('videoResult'),
+        strikes: document.getElementById('vidStrikes'),
+        accuracy: document.getElementById('vidAccuracy'),
+        perf: document.getElementById('vidPerf'),
+        fatigue: document.getElementById('vidFatigue'),
+        most: document.getElementById('vidMost'),
+        reaction: document.getElementById('vidReaction'),
+        suggestions: document.getElementById('vidSuggestions'),
+        timeline: document.getElementById('videoTimeline'),
+        scrub: document.getElementById('videoScrub'),
+        scrubInfo: document.getElementById('videoScrubInfo'),
+    };
+    let videoData = null;
+
+    async function uploadVideo(file) {
+        if (!file) return;
+        ve.error.textContent = '';
+        ve.result.hidden = true;
+        ve.track.hidden = false;
+        ve.status.textContent = 'Uploading…';
+        ve.fill.style.width = '0%';
+        ve.pct.textContent = '0%';
+        const fd = new FormData();
+        fd.append('file', file);
+        let jobId;
+        try {
+            const res = await fetch('/api/analyze', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'upload failed');
+            jobId = data.job_id;
+        } catch (err) {
+            ve.error.textContent = 'Upload error: ' + err.message;
+            return;
+        }
+        // Poll
+        for (;;) {
+            await new Promise((r) => setTimeout(r, 1500));
+            let job;
+            try {
+                job = await (await fetch('/api/analyze/' + jobId)).json();
+            } catch (_) { continue; }
+            if (ve.fill) { ve.fill.style.width = (job.progress || 0) + '%'; ve.pct.textContent = Math.round(job.progress || 0) + '%'; }
+            ve.status.textContent = job.status === 'processing'
+                ? 'Analysing frames…' : job.status;
+            if (job.status === 'done') { renderVideoResult(job.result); return; }
+            if (job.status === 'error') { ve.error.textContent = 'Analysis error: ' + (job.error || '?'); return; }
+        }
+    }
+
+    function renderVideoResult(result) {
+        const s = (result && result.summary) || {};
+        ve.strikes.textContent = s.total_strikes || 0;
+        ve.accuracy.textContent = (s.accuracy_pct || 0) + '%';
+        ve.perf.textContent = s.performance || 0;
+        ve.fatigue.textContent = s.final_fatigue || 0;
+        ve.most.textContent = 'Most used: ' + ((s.most_used || 'none').replace(/_/g, ' '));
+        ve.reaction.textContent = 'Reaction: ' + (s.reaction_s || 0).toFixed(2) + 's';
+        ve.suggestions.textContent = (s.suggestions || []).join(' · ');
+        videoData = result;
+        ve.result.hidden = false;
+        ve.status.textContent = 'Done — ' + ((result.timeline || []).length) + ' strikes detected.';
+        drawVideoTimeline();
+        const dur = Math.max(1, result.duration_s || 1);
+        ve.scrub.max = 100;
+        ve.scrub.value = 0;
+        ve.scrubInfo.textContent = 'Drag to scrub — 0s';
+    }
+
+    function drawVideoTimeline() {
+        if (!ve.timeline || !videoData) return;
+        const ctx = ve.timeline.getContext('2d');
+        const W = ve.timeline.width, H = ve.timeline.height;
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = '#8a8aa3';
+        ctx.font = '10px sans-serif';
+        const tl = videoData.timeline || [];
+        const dur = Math.max(1, videoData.duration_s || 1);
+        tl.forEach((e) => {
+            const x = (e.t / dur) * W;
+            const h = 8 + Math.min(26, (e.confidence || 0.5) * 26);
+            ctx.fillStyle = 'rgba(0,255,200,0.85)';
+            ctx.fillRect(x, H - h, 3, h);
+        });
+        // time ticks
+        for (let i = 0; i <= 5; i++) {
+            const t = Math.round((dur / 5) * i);
+            ctx.fillText(t + 's', (W / 5) * i, 10);
+        }
+    }
+
+    function onScrub() {
+        if (!videoData) return;
+        const dur = Math.max(1, videoData.duration_s || 1);
+        const t = (ve.scrub.value / 100) * dur;
+        const near = (videoData.timeline || []).filter((e) => Math.abs(e.t - t) < 0.8);
+        const label = near.length
+            ? near.map((e) => (e.type || '').replace(/_/g, ' ') + ' (' +
+                Math.round((e.confidence || 0) * 100) + '%)').join(', ')
+            : 'no strike at this moment';
+        ve.scrubInfo.textContent = Math.round(t) + 's — ' + label;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        if (ve.file) ve.file.addEventListener('change', () => uploadVideo(ve.file.files[0]));
+        if (ve.scrub) ve.scrub.addEventListener('input', onScrub);
     });
 })();

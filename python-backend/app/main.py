@@ -52,7 +52,9 @@ from .engine import (
     PurePythonStyleEncoder,
 )
 from .coach import CoachEngine, MovementAnalyzer
-from .analytics import FatigueTracker
+from .analytics import (FatigueTracker, build_session_summary)
+from .video_analyzer import (VideoJobManager, _mean_joint_disp, speed_band)
+from .coach import L_ANKLE, L_WRIST, R_ANKLE, R_WRIST
 
 logger = logging.getLogger("hadin")
 logging.basicConfig(level=logging.INFO,
@@ -300,6 +302,14 @@ ai_core._style_py = PurePythonStyleEncoder()
 ai_core._opponent_py = PurePythonOpponentGenerator()
 ai_core._coev_py = PurePythonCoEvolution()
 
+# Offline video analysis jobs (background threads with progress).
+video_jobs = VideoJobManager(ai_core.pose_keypoints)
+UPLOAD_DIR = BASE_DIR / "data" / "uploads"
+
+# Live "rounds" for the timer HUD.
+ROUND_SECONDS = 180     # 3-minute rounds
+REST_SECONDS = 60       # 1-minute rest between rounds
+
 
 # ---------------------------------------------------------------------------
 # Session management
@@ -329,6 +339,10 @@ class SessionManager:
             # Sparring-partner AI profile: start from the user's saved
             # preference (JSON), defaulting to "balanced".
             "profile": _saved_profile(),
+            # Post-session summary / live-panel accumulators.
+            "quality_list": [],          # (quality, confidence) per landed strike
+            "fatigue_progression": [],   # [elapsed_s, fatigue_score] samples
+            "_prev_norm": None,          # last normalized pose (speed calc)
         }
 
     def touch(self, client_id: str) -> Optional[Dict[str, Any]]:
@@ -358,13 +372,13 @@ HISTORY: List[Dict[str, Any]] = []
 MAX_HISTORY = 20
 
 
-def _record_history(client_id: str, sess: Optional[Dict[str, Any]]) -> None:
-    """Save a concise summary of a finished session for the dashboard."""
-    if not sess:
-        return
+def _compose_session_summary(client_id: str, sess: Dict[str, Any],
+                             source: str = "live",
+                             title: Optional[str] = None) -> Dict[str, Any]:
+    """Build the full match-summary dict for a session (no history side-effects)."""
     coach = sess.get("coach")
     fatigue = sess.get("fatigue")
-    counts = getattr(coach, "counts", None) or {}
+    counts = dict(getattr(coach, "counts", None) or {})
     try:
         fatigue_score = fatigue.score()["score"] if fatigue else 0
     except Exception:  # noqa: BLE001
@@ -375,20 +389,39 @@ def _record_history(client_id: str, sess: Optional[Dict[str, Any]]) -> None:
     except Exception:  # noqa: BLE001
         m = {}
     total = sess.get("_strikes_seen", 0)
-    summary = {
+    quality_list = sess.get("quality_list") or []
+    landed = sum(1 for q, c in quality_list if q >= 70 or c >= 0.6)
+
+    summ = build_session_summary(
+        total_strikes=total, landed=landed, counts=counts,
+        avg_quality=m.get("avg_quality", 0),
+        tempo=m.get("tempo_per_s", 0),
+        reaction_s=m.get("reaction_s", 0.0),
+        final_fatigue=fatigue_score,
+        duration_s=duration,
+        fatigue_curve=sess.get("fatigue_progression") or [],
+    )
+    return {
         "client_id": client_id,
+        "source": source,
+        "title": title or f"{source} session",
         "ended": round(time.time(), 1),
         "duration_s": round(duration),
         "frames": sess.get("frames", 0),
         "profile": sess.get("profile", "balanced"),
         "techniques": counts,
-        "total_strikes": total,
-        "fatigue": fatigue_score,
-        "avg_quality": m.get("avg_quality", 0),
-        "reaction_s": m.get("reaction_s", 0.0),
         "strikes_per_min": round((total / duration) * 60) if duration else 0,
+        "fatigue": fatigue_score,
+        **summ,
     }
-    HISTORY.append(summary)
+
+
+def _record_history(client_id: str, sess: Optional[Dict[str, Any]],
+                    source: str = "live", title: Optional[str] = None) -> None:
+    """Save a full match summary of a finished session/video for the dashboard."""
+    if not sess:
+        return
+    HISTORY.append(_compose_session_summary(client_id, sess, source, title))
     del HISTORY[:-MAX_HISTORY]
 
 # In-memory athlete profile (persist to Redis in production).
@@ -460,6 +493,15 @@ async def process_frame(websocket: WebSocket, client_id: str,
         movements = sess["movement"].analyze()
         coach = sess["coach"].update(movements)
 
+        # Movement speed (live-panel indicator): wrist/ankle displacement.
+        prev_norm = sess.get("_prev_norm")
+        speed_band_live = "slow"
+        if prev_norm is not None:
+            disp = _mean_joint_disp(prev_norm, norm,
+                                    (L_WRIST, R_WRIST, L_ANKLE, R_ANKLE))
+            speed_band_live = speed_band(disp * 10)   # ~10 sampled fps
+        sess["_prev_norm"] = norm
+
         # Fatigue analysis: track stance stability each frame and feed each NEW
         # strike once with a "snap" proxy (confidence x quality ~ explosive speed).
         sess["fatigue"].observe_stance(norm)
@@ -474,8 +516,19 @@ async def process_frame(websocket: WebSocket, client_id: str,
                 snap = 0.6
             for _ in range(total - prev):
                 sess["fatigue"].observe_strike(snap)
+            if latest:
+                sess.setdefault("quality_list", []).append(
+                    [latest.get("quality", 0), latest.get("confidence", 0)])
             sess["_strikes_seen"] = total
+    else:
+        speed_band_live = "slow"
     fatigue = sess["fatigue"].score()
+
+    # Fatigue progression curve (sampled ~every 12 frames) for the dashboard.
+    if sess["frames"] % 12 == 0:
+        elapsed_now = time.time() - sess.get("started", time.time())
+        sess.setdefault("fatigue_progression", []).append(
+            [round(elapsed_now, 1), fatigue["score"]])
 
     # Co-evolution drives difficulty; the sparring profile applies its own bias.
     from .profiles import difficulty_for
@@ -501,6 +554,52 @@ async def process_frame(websocket: WebSocket, client_id: str,
         feedback["notes"] = (notes + feedback.get("notes", []))[:3]
     latency_ms = (time.perf_counter() - t0) * 1000.0
 
+    # ---- LIVE ANALYSIS payload (strike, fatigue, profile, round, speed,
+    # ---- coaching tip and latest action summary for the live panel).
+    elapsed = time.time() - sess.get("started", time.time())
+    period = ROUND_SECONDS + REST_SECONDS
+    phase = elapsed % period
+    round_no = int(elapsed // period) + 1
+    if phase <= ROUND_SECONDS:
+        phase_label, remain = "round", ROUND_SECONDS - phase
+    else:
+        phase_label, remain = "rest", phase - ROUND_SECONDS
+
+    strike = None
+    latest = coach.get("last")
+    if latest:
+        strike = {"type": latest.get("type"), "side": latest.get("side"),
+                  "confidence_pct": round((latest.get("confidence", 0) or 0) * 100),
+                  "quality": latest.get("quality")}
+
+    action = "Stay light on your feet — pick your moments."
+    if strike:
+        q = strike["quality"] or 0
+        good = q >= 70
+        action = f"{strike['type'].replace('_', ' ').title()} thrown — " + \
+                 ("good form!" if good else "work on the extension.")
+    elif fatigue["level"] == "fatigued":
+        action = "Fatigue increasing — slow down and breathe."
+    elif speed_band_live == "fast":
+        action = "Moving fast — keep your guard up between strikes."
+
+    tip = (notes[0] if notes else
+           "Breathe, stay light, and keep your hands high.")
+
+    analysis = {
+        "strike": strike,
+        "fatigue_score": fatigue["score"],
+        "fatigue_level": fatigue["level"],
+        "profile": PROFILES.get(sess["profile"], PROFILES["balanced"])["label"],
+        "elapsed_s": round(elapsed, 1),
+        "round": round_no,
+        "phase": phase_label,
+        "phase_remain": max(0, int(remain)),
+        "speed_band": speed_band_live,
+        "tip": tip,
+        "action": action,
+    }
+
     # NOTE: no debug frame is sent back — the browser draws the overlays on
     # the LIVE video element, which removes the JPEG round-trip entirely
     # (this was the main source of camera lag on phones).
@@ -514,6 +613,7 @@ async def process_frame(websocket: WebSocket, client_id: str,
         "movements": movements,
         "coach": coach,
         "fatigue": fatigue,
+        "analysis": analysis,
         "difficulty": round(sess["difficulty"], 2),
         "latency_ms": round(latency_ms, 2),
         "backend": ai_core.backend,
@@ -550,6 +650,12 @@ async def handle_json(websocket: WebSocket, client_id: str, text: str) -> None:
             await websocket.send_json({"type": "profile_ack", "profile": name})
         else:
             await websocket.send_json({"type": "error", "message": f"Unknown profile: {name}"})
+    elif msg_type == "summary":
+        if sess:
+            await websocket.send_json({
+                "type": "match_summary",
+                **_compose_session_summary(client_id, sess),
+            })
     elif msg_type == "feedback_text":
         await websocket.send_json({"type": "feedback",
                                    "message": data.get("text", "")})
@@ -648,6 +754,68 @@ async def api_session(request) -> JSONResponse:
     return JSONResponse({"live": False, "error": "session not found"}, status_code=404)
 
 
+# Videos archived into HISTORY only once, when their job completes.
+_archived_videos: set = set()
+_ALLOWED_VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
+
+
+async def api_analyze_upload(request) -> JSONResponse:
+    """Upload a sparring video for offline analysis -> {job_id}."""
+    try:
+        form = await request.form()
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": f"bad form data: {exc}"}, status_code=400)
+    upload = form.get("file")
+    if upload is None or not hasattr(upload, "filename") or not upload.filename:
+        return JSONResponse({"error": "no file provided (field 'file')"}, status_code=400)
+
+    ext = os.path.splitext(str(upload.filename))[1].lower()
+    if ext not in _ALLOWED_VIDEO_EXTS:
+        return JSONResponse(
+            {"error": f"unsupported type '{ext}' — use MP4/MOV/AVI"},
+            status_code=415)
+
+    try:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        dest = UPLOAD_DIR / f"upload_{int(time.time() * 1000)}{ext}"
+        data = await upload.read()
+        dest.write_bytes(data)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("upload failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    job_id = video_jobs.submit(str(dest))
+    return JSONResponse({"job_id": job_id, "filename": str(upload.filename)})
+
+
+async def api_analyze_status(request) -> JSONResponse:
+    """Poll analysis progress; on completion, archive the result in HISTORY."""
+    job_id = request.path_params.get("job_id", "")
+    job = video_jobs.get(job_id)
+    if job["status"] == "done" and job_id not in _archived_videos:
+        result = job.get("result") or {}
+        summ = result.get("summary") or {}
+        entry = {
+            "client_id": f"video-{job_id}",
+            "source": "video",
+            "title": result.get("title", "Video analysis"),
+            "ended": round(time.time(), 1),
+            "duration_s": summ.get("duration_s", 0),
+            "frames": result.get("frames_analysed", 0),
+            "profile": summ.get("profile", "balanced"),
+            "techniques": result.get("techniques") or {},
+            "strikes_per_min": round(
+                (summ.get("total_strikes", 0) / max(1, summ.get("duration_s", 1))) * 60),
+            "fatigue": summ.get("final_fatigue", 0),
+            **summ,
+        }
+        HISTORY.append(entry)
+        del HISTORY[:-MAX_HISTORY]
+        _archived_videos.add(job_id)
+        video_jobs.prune()
+    return JSONResponse(job)
+
+
 async def ws_endpoint(websocket: WebSocket, **kwargs: Any) -> None:
     # Starlette >= 1.6 calls WebSocket endpoints with only the session; older
     # versions pass path params as kwargs. Read client_id from either source.
@@ -713,6 +881,8 @@ _routes = [
     Route("/api/health", endpoint=api_health, methods=["GET"]),
     Route("/api/stats", endpoint=api_stats, methods=["GET"]),
     Route("/api/history", endpoint=api_history, methods=["GET"]),
+    Route("/api/analyze", endpoint=api_analyze_upload, methods=["POST"]),
+    Route("/api/analyze/{job_id}", endpoint=api_analyze_status, methods=["GET"]),
     Route("/api/session/{client_id}", endpoint=api_session, methods=["GET"]),
     WebSocketRoute("/ws/{client_id}", endpoint=ws_endpoint),
 ]

@@ -51,6 +51,43 @@
             <div class="hud hud-difficulty" id="hudDifficulty">Difficulty: 40%</div>
         </section>
 
+        <!-- LIVE ANALYSIS PANEL (below the camera feed) -->
+        <section class="panel live-panel" id="livePanel">
+            <div class="live-row">
+                <div class="live-cell">
+                    <span class="live-label">Strike</span>
+                    <span class="live-big" id="liveStrike">—</span>
+                    <span class="live-sub" id="liveStrikeConf"></span>
+                </div>
+                <div class="live-cell">
+                    <span class="live-label">Fatigue</span>
+                    <span class="live-big" id="liveFatigue">0</span>
+                    <div class="quality-bar"><div class="quality-fill" id="liveFatigueFill" style="width:0%"></div></div>
+                </div>
+                <div class="live-cell">
+                    <span class="live-label">Opponent</span>
+                    <span class="live-big" id="liveProfile">Balanced</span>
+                </div>
+            </div>
+            <div class="live-row">
+                <div class="live-cell">
+                    <span class="live-label">Round</span>
+                    <span class="live-big" id="liveRound">R1</span>
+                    <span class="live-sub" id="liveRoundTime">0:00</span>
+                </div>
+                <div class="live-cell">
+                    <span class="live-label">Duration</span>
+                    <span class="live-big" id="liveDuration">0:00</span>
+                </div>
+                <div class="live-cell">
+                    <span class="live-label">Speed</span>
+                    <span class="live-big" id="liveSpeed">slow</span>
+                </div>
+            </div>
+            <div class="live-action" id="liveAction">Press Start to begin your session.</div>
+            <div class="live-tip" id="liveTip">Your AI coach is warming up…</div>
+        </section>
+
         <!-- Feedback panel -->
         <section class="feedback" id="feedbackPanel">
             <div class="feedback-head">
@@ -111,6 +148,31 @@
             &amp; <a href="https://github.com/">Dina Balcheh</a>
         </p>
     </footer>
+
+    <!-- Match summary modal -->
+    <div class="modal-mask" id="summaryMask" hidden>
+        <div class="modal">
+            <div class="feedback-head">
+                <h2>🏆 Match Summary</h2>
+                <button class="modal-close" id="summaryClose" aria-label="Close">✕</button>
+            </div>
+            <div class="cards">
+                <div class="card"><div class="card-num" id="sumStrikes">0</div><div class="card-label">Strikes</div></div>
+                <div class="card"><div class="card-num" id="sumLanded">0</div><div class="card-label">Landed</div></div>
+                <div class="card"><div class="card-num" id="sumAccuracy">0%</div><div class="card-label">Accuracy</div></div>
+                <div class="card"><div class="card-num" id="sumPerformance">0</div><div class="card-label">Performance</div></div>
+            </div>
+            <div class="sum-stats">
+                <span id="sumMost">Most used: —</span>
+                <span id="sumReaction">Reaction: —</span>
+                <span id="sumFatigue">Fatigue: —</span>
+                <span id="sumTime">Duration: —</span>
+            </div>
+            <h3 class="sum-head">💡 Improvement suggestions</h3>
+            <ul class="feedback-list" id="sumSuggestions"></ul>
+            <button class="btn btn-primary modal-go" id="summaryOk">Done</button>
+        </div>
+    </div>
 
     <script src="js/app.js"></script>
 </body>

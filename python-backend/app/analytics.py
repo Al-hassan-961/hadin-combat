@@ -190,3 +190,84 @@ class FatigueTracker:
 
     def reset(self) -> None:
         self.__init__()
+
+
+# ---------------------------------------------------------------------------
+# Post-session / post-analysis summary helpers
+# ---------------------------------------------------------------------------
+LANDED_QUALITY = 70        # a technique at/above this quality counts as "landed"
+LANDED_CONFIDENCE = 0.6    # ... and/or this detection confidence
+
+
+def most_used_technique(counts: Dict[str, int]) -> Optional[str]:
+    """Most frequent landed technique name, or None."""
+    if not counts:
+        return None
+    return max(counts, key=lambda k: counts[k])
+
+
+def performance_score(accuracy: float, avg_quality: float,
+                      tempo: float, final_fatigue: float) -> int:
+    """0-100 overall performance from accuracy, quality, tempo and fatigue."""
+    acc = max(0.0, min(1.0, accuracy)) * 100
+    score = (0.45 * acc + 0.25 * avg_quality + 0.15 * min(100, tempo * 40)
+             + 0.15 * (100 - max(0, min(100, final_fatigue))))
+    return int(max(0, min(100, round(score))))
+
+
+def improvement_suggestions(most_used: Optional[str], accuracy: float,
+                            final_fatigue: int, reaction_s: float,
+                            total_strikes: int) -> List[str]:
+    """Top personalised improvement tips."""
+    tips: List[str] = []
+    acc = accuracy * 100
+    if total_strikes == 0:
+        tips.append("Keep training — throw more strikes so I can analyse your form.")
+        return tips
+    if acc < 60:
+        tips.append("Your clean-technique rate is low — slow down and focus on "
+                    "crisp, full extensions over speed.")
+    elif acc >= 85:
+        tips.append("Excellent clean technique rate — now raise your output/volume "
+                    "while keeping that accuracy.")
+    if most_used:
+        tips.append(f"Your most-used strike is {most_used.replace('_', ' ')} — "
+                    f"drill it into faster, sharper reps.")
+    if reaction_s >= 1.0:
+        tips.append("Reactions are slow — drill simple jab-cross responses to "
+                    "sharpen your timing.")
+    if final_fatigue >= 60:
+        tips.append("You finished fatigued — build rounds with short rests to "
+                    "extend your work capacity.")
+    if len(tips) < 2:
+        tips.append("Mix up sparring profiles (e.g. counter-puncher) to develop "
+                    "your defence.")
+    return tips[:3]
+
+
+def build_session_summary(total_strikes: int = 0, landed: int = 0,
+                          counts: Optional[Dict[str, int]] = None,
+                          avg_quality: float = 0.0, tempo: float = 0.0,
+                          reaction_s: float = 0.0, final_fatigue: int = 0,
+                          duration_s: float = 0.0,
+                          fatigue_curve: Optional[List] = None) -> Dict[str, Any]:
+    """Assemble the comprehensive match/analysis summary shown post-session."""
+    counts = dict(counts or {})
+    accuracy = (landed / total_strikes) if total_strikes else 0.0
+    most = most_used_technique(counts)
+    return {
+        "total_strikes": total_strikes,
+        "landed": landed,
+        "accuracy": round(accuracy, 3),
+        "accuracy_pct": round(accuracy * 100),
+        "most_used": most or "none",
+        "avg_quality": round(avg_quality),
+        "reaction_s": round(reaction_s, 2),
+        "tempo_per_s": round(tempo, 2),
+        "performance": performance_score(accuracy, avg_quality, tempo, final_fatigue),
+        "final_fatigue": int(final_fatigue),
+        "duration_s": round(duration_s),
+        "fatigue_curve": [list(p) for p in (fatigue_curve or [])],
+        "suggestions": improvement_suggestions(
+            most, accuracy, int(final_fatigue), reaction_s, total_strikes),
+    }

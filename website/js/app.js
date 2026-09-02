@@ -48,6 +48,8 @@
     let voiceOn = false;
     let lastSpoken = '';
     let lastTechniqueType = null;
+    let tipLastShown = 0;
+    let tipCurrent = '';
 
     // ---- Text-to-speech voice coaching (Web Speech API) -------------------
     function speak(text) {
@@ -114,6 +116,9 @@
         }
         if (msg.type === 'profile_ack') {
             addFeedback('Sparring profile: ' + (msg.profile || '') + '.');
+        }
+        if (msg.type === 'match_summary') {
+            showMatchSummary(msg);
         }
         if (msg.type === 'error') {
             addFeedback('⚠ ' + (msg.message || 'Unknown error'));
@@ -295,6 +300,7 @@
             }
         }
         if (msg.fatigue) updateFatigue(msg.fatigue);
+        if (msg.analysis) updateLivePanel(msg.analysis);
     }
 
     function drawSkeleton(kps) {
@@ -452,6 +458,93 @@
         }
     }
 
+    // ---- LIVE ANALYSIS PANEL ------------------------------------------------
+    function fmtClock(sec) {
+        sec = Math.max(0, Math.floor(sec || 0));
+        const m = Math.floor(sec / 60), s = sec % 60;
+        return m + ':' + (s < 10 ? '0' : '') + s;
+    }
+
+    function updateLivePanel(a) {
+        if (!a) return;
+        const g = (id) => document.getElementById(id);
+
+        // Strike + confidence
+        const strike = a.strike;
+        if (g('liveStrike')) {
+            g('liveStrike').textContent = strike && MOVE_LABELS[strike.type]
+                ? MOVE_LABELS[strike.type] : '—';
+        }
+        if (g('liveStrikeConf')) {
+            g('liveStrikeConf').textContent = strike
+                ? (strike.confidence_pct || 0) + '% conf · quality ' + (strike.quality || 0)
+                : '';
+        }
+        // Fatigue
+        if (g('liveFatigue')) g('liveFatigue').textContent = a.fatigue_score || 0;
+        if (g('liveFatigueFill')) {
+            const fs = a.fatigue_score || 0;
+            g('liveFatigueFill').style.width = fs + '%';
+            g('liveFatigueFill').style.background =
+                fs < 30 ? 'var(--neon)' : fs < 60 ? '#ffd166' : 'var(--accent)';
+        }
+        // Profile
+        if (g('liveProfile')) g('liveProfile').textContent = a.profile || 'Balanced';
+        // Round + duration
+        if (g('liveRound')) g('liveRound').textContent = 'R' + (a.round || 1);
+        if (g('liveRoundTime')) {
+            g('liveRoundTime').textContent =
+                (a.phase === 'rest' ? 'rest ' : '') + fmtClock(a.phase_remain);
+        }
+        if (g('liveDuration')) g('liveDuration').textContent = fmtClock(a.elapsed_s);
+        // Speed
+        if (g('liveSpeed')) {
+            const sp = a.speed_band || 'slow';
+            g('liveSpeed').textContent = sp;
+            g('liveSpeed').style.color =
+                sp === 'fast' ? 'var(--accent)' : sp === 'medium' ? '#ffd166' : 'var(--neon)';
+        }
+        // Latest action
+        if (g('liveAction') && a.action) g('liveAction').textContent = '🎯 ' + a.action;
+        // Coaching tip — refresh at most every 10 seconds
+        if (a.tip) {
+            const now = Date.now();
+            if (now - tipLastShown >= 10000 || !tipCurrent) {
+                tipCurrent = a.tip;
+                tipLastShown = now;
+                if (g('liveTip')) g('liveTip').textContent = '💬 ' + a.tip;
+            }
+        }
+    }
+
+    // ---- MATCH SUMMARY MODAL --------------------------------------------------
+    function showMatchSummary(s) {
+        const g = (id) => document.getElementById(id);
+        if (!g('summaryMask')) return;
+        g('sumStrikes').textContent = s.total_strikes || 0;
+        g('sumLanded').textContent = s.landed || 0;
+        g('sumAccuracy').textContent = (s.accuracy_pct || 0) + '%';
+        g('sumPerformance').textContent = s.performance || 0;
+        g('sumMost').textContent = 'Most used: ' + ((s.most_used || 'none').replace(/_/g, ' '));
+        g('sumReaction').textContent = 'Reaction: ' + (s.reaction_s || 0).toFixed(2) + 's';
+        g('sumFatigue').textContent = 'Final fatigue: ' + (s.final_fatigue || 0);
+        g('sumTime').textContent = 'Duration: ' + fmtClock(s.duration_s);
+        const ul = g('sumSuggestions');
+        ul.innerHTML = '';
+        ((s.suggestions || []).length ? s.suggestions
+            : ['Complete a session to receive tips.']).forEach((tip) => {
+            const li = document.createElement('li');
+            li.textContent = tip;
+            ul.appendChild(li);
+        });
+        g('summaryMask').hidden = false;
+    }
+
+    function hideMatchSummary() {
+        const m = document.getElementById('summaryMask');
+        if (m) m.hidden = true;
+    }
+
     function updateFeedback(fb) {
         els.grade.textContent = fb.grade || 'C';
         els.grade.className = 'grade ' + (fb.grade || 'c').toLowerCase();
@@ -482,6 +575,7 @@
     // ---- Controls ---------------------------------------------------------------
     els.startBtn.addEventListener('click', async () => {
         if (!running) {
+            hideMatchSummary();
             await startCamera();
             running = true;
             els.startBtn.textContent = '■ Stop';
@@ -494,8 +588,17 @@
             els.startBtn.classList.remove('recording');
             stopCamera();
             els.stageMessage.style.display = 'flex';
+            // Ask the server for the end-of-session match summary.
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'summary' }));
+            }
         }
     });
+
+    const summaryClose = document.getElementById('summaryClose');
+    const summaryOk = document.getElementById('summaryOk');
+    if (summaryClose) summaryClose.addEventListener('click', hideMatchSummary);
+    if (summaryOk) summaryOk.addEventListener('click', hideMatchSummary);
 
     els.resetBtn.addEventListener('click', () => {
         if (ws && ws.readyState === WebSocket.OPEN) {
