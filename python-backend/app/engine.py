@@ -181,63 +181,105 @@ class PurePythonCoEvolution:
 # Motion-based pose fallback (pure OpenCV, no models)
 # ---------------------------------------------------------------------------
 class MotionPoseEstimator:
-    """Crude last-resort pose detector using background subtraction.
+    """Model-free pose fallback using background subtraction.
 
-    This exists purely so the app still produces keypoints and feedback when
-    neither the C++ core nor MediaPipe is available. It estimates a bounding
-    box around the subject and synthesizes a plausible COCO skeleton inside it.
+    Exists so the app still produces keypoints and feedback when neither the
+    C++ core nor MediaPipe is available. To keep it fast on phones it runs on
+    a half-resolution frame, and the synthesized skeleton is MOTION-AWARE:
+    arm/leg positions react to where the foreground mass is (raised arms spread
+    the shoulders, big lower-body mass widens the stance), and bbox movement
+    adds swing — so the AI coach can still detect gross techniques.
     """
 
-    def __init__(self, history: int = 240, var_threshold: int = 32) -> None:
+    def __init__(self, history: int = 120, var_threshold: int = 32) -> None:
         from .camera_processor import cv2
 
         self._cv2 = cv2
         self._bg = cv2.createBackgroundSubtractorMOG2(
-            history=history, varThreshold=var_threshold, detectShadows=True)
+            history=history, varThreshold=var_threshold, detectShadows=False)
+        self._prev_center: Optional[Tuple[float, float]] = None
+
+    def reset(self) -> None:
+        self._prev_center = None
 
     def pose_keypoints(self, frame: Any) -> Optional[List[Dict[str, float]]]:
         cv2 = self._cv2
-
         h, w = frame.shape[:2]
-        mask = self._bg.apply(frame)
-        # Clean the mask a little.
+
+        # ---- half-resolution background subtraction (CPU-friendly) ---------
+        scale = 0.5
+        sw, sh = max(1, int(w * scale)), max(1, int(h * scale))
+        small = cv2.resize(frame, (sw, sh))
+        mask = self._bg.apply(small)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,
-                                cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+                                cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
-                                cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))
+                                cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
 
         cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not cnts:
+            self._prev_center = None
             return None
         big = max(cnts, key=cv2.contourArea)
-        if cv2.contourArea(big) < (w * h) * 0.01:
+        if cv2.contourArea(big) < (sw * sh) * 0.01:
+            self._prev_center = None
             return None
 
-        x, y, bw, bh = cv2.boundingRect(big)
-        cx = x + bw / 2.0
-        cy = y + bh / 2.0
-        top = y
-        height = max(1, bh)
+        x_s, y_s, bw_s, bh_s = cv2.boundingRect(big)
 
-        # Synthesize a 17-keypoint COCO skeleton inside the bounding box.
+        # ---- foreground mass distribution (drives the skeleton) ------------
+        x0, y0 = x_s, y_s
+        x1 = min(sw, x_s + bw_s)
+        y_mid = min(sh, y_s + max(1, bh_s // 2))
+        y1 = min(sh, y_s + bh_s)
+        upper = int(cv2.countNonZero(mask[y0:y_mid, x0:x1]))
+        lower = int(cv2.countNonZero(mask[y_mid:y1, x0:x1]))
+        total = upper + lower
+        arm_factor = min(1.0, (upper / max(lower, 1)) * 1.1) if total else 0.35
+        leg_factor = min(1.0, (lower / max(upper, 1)) * 0.9) if total else 0.5
+
+        # ---- scale back to full frame ----------------------------------------
+        xs = w / sw
+        ys = h / sh
+        x, y = x_s * xs, y_s * ys
+        bw, bh = bw_s * xs, bh_s * ys
+        cx = x + bw / 2.0
+        top = y
+        height = max(1.0, bh)
+
+        # ---- bbox motion adds swing to the limbs (punch-like movement) -------
+        swing = 0.0
+        if self._prev_center is not None:
+            dx = cx - self._prev_center[0]
+            swing = min(0.12, abs(dx) * 0.5) * (1.0 if dx > 0 else -1.0)
+        self._prev_center = (cx, top + height / 2)
+
+        # ---- synthesize a 17-keypoint COCO skeleton ----------------------------
         def k(px: float, py: float) -> Dict[str, float]:
             return {"x": px, "y": py, "score": 0.7}
 
         shoulder_w = bw * 0.18
+        arm_reach = 1.0 + 0.9 * arm_factor          # arms out when upper mass big
+        wrist_lift = 0.40 - 0.10 * arm_factor       # wrists higher with raised arms
+        ankle_spread = 0.7 + 0.45 * leg_factor      # wider stance with big lower mass
+
+        def lw(off: float, fy: float) -> float:
+            return cx + off * shoulder_w * arm_reach + swing
+
         pts = {
             NOSE: k(cx, top + height * 0.05),
             L_SHOULDER: k(cx - shoulder_w, top + height * 0.18),
             R_SHOULDER: k(cx + shoulder_w, top + height * 0.18),
-            L_ELBOW: k(cx - shoulder_w * 1.2, top + height * 0.32),
-            R_ELBOW: k(cx + shoulder_w * 1.2, top + height * 0.32),
-            L_WRIST: k(cx - shoulder_w * 1.1, top + height * 0.48),
-            R_WRIST: k(cx + shoulder_w * 1.1, top + height * 0.48),
+            L_ELBOW: k(lw(-1.15, 0.32), top + height * 0.32),
+            R_ELBOW: k(lw(1.15, 0.32), top + height * 0.32),
+            L_WRIST: k(lw(-arm_reach, wrist_lift), top + height * wrist_lift),
+            R_WRIST: k(lw(arm_reach, wrist_lift), top + height * wrist_lift),
             L_HIP: k(cx - shoulder_w * 0.8, top + height * 0.55),
             R_HIP: k(cx + shoulder_w * 0.8, top + height * 0.55),
             L_KNEE: k(cx - shoulder_w * 0.8, top + height * 0.74),
             R_KNEE: k(cx + shoulder_w * 0.8, top + height * 0.74),
-            L_ANKLE: k(cx - shoulder_w * 0.7, top + height * 0.92),
-            R_ANKLE: k(cx + shoulder_w * 0.7, top + height * 0.92),
+            L_ANKLE: k(cx - shoulder_w * ankle_spread, top + height * 0.92),
+            R_ANKLE: k(cx + shoulder_w * ankle_spread, top + height * 0.92),
         }
-        return [pts.get(i, {"x": cx, "y": cy, "score": 0.0})
+        return [pts.get(i, {"x": cx, "y": top + height / 2, "score": 0.0})
                 for i in range(17)]

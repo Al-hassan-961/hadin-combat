@@ -36,6 +36,7 @@
 
     let ws = null;
     let running = false;
+    let showOpponent = true;
     let stream = null;
     let captureTimer = null;
     let lastFrameTime = 0;
@@ -140,8 +141,9 @@
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 throw new Error('no-getusermedia');
             }
+            // Modest resolution keeps the phone camera + pipeline smooth.
             stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+                video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 360 } },
                 audio: false,
             });
             els.video.srcObject = stream;
@@ -167,9 +169,9 @@
 
     // ---- Frame capture -----------------------------------------------------
     function captureLoop() {
-        // ~15 fps stream keeps bandwidth and latency low.
-        const FPS = 15;
-        const interval = Math.max(50, Math.round(1000 / FPS));
+        // 10 fps keeps the phone CPU, WebSocket and analysis smooth.
+        const FPS = 10;
+        const interval = Math.max(80, Math.round(1000 / FPS));
         captureTimer = setInterval(() => {
             if (!running || !els.video.readyState) return;
 
@@ -186,7 +188,7 @@
                     ws.send(blob);
                     updateFps();
                 }
-            }, 'image/jpeg', 0.7);
+            }, 'image/jpeg', 0.6);
         }, interval);
     }
 
@@ -209,7 +211,7 @@
         els.overlay.width = w;
         els.overlay.height = h;
 
-        // Base debug frame sent by the server (skeleton already drawn).
+        // Base debug frame sent by the server (athlete skeleton already drawn).
         if (msg.debug_frame) {
             const img = new Image();
             img.onload = () => ctx.drawImage(img, 0, 0, w, h);
@@ -218,8 +220,9 @@
             drawSkeleton(msg.keypoints, w, h);
         }
 
-        // Opponent overlay (drawn as a ghost).
-        if (msg.opponent && msg.opponent.length) {
+        // Opponent ghost overlay — drawn client-side so it can be toggled off
+        // (the server no longer bakes it into the debug frame).
+        if (showOpponent && msg.opponent && msg.opponent.length) {
             drawOpponent(msg.opponent, w, h);
         }
 
@@ -381,6 +384,16 @@
             ws.send(JSON.stringify({ type: 'reset' }));
         }
     });
+
+    // Ghost (opponent) toggle — avoids a confusing second stickman when off.
+    els.ghostBtn = els.ghostBtn || document.getElementById('ghostBtn');
+    if (els.ghostBtn) {
+        els.ghostBtn.addEventListener('click', () => {
+            showOpponent = !showOpponent;
+            els.ghostBtn.textContent = showOpponent ? '👻 Ghost: on' : '👻 Ghost: off';
+            els.ghostBtn.classList.toggle('btn-active', showOpponent);
+        });
+    }
 
     // ---- Connection / share bar ---------------------------------------------
     function setupConnectBar() {

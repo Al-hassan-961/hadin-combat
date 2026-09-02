@@ -43,10 +43,8 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from .camera_processor import (
     cv2_info,
     decode_jpeg_frame,
-    draw_opponent,
     draw_skeleton,
     jpeg_bytes,
-    scale_keypoints_to_frame,
 )
 from .engine import (
     MotionPoseEstimator,
@@ -378,20 +376,29 @@ async def process_frame(websocket: WebSocket, client_id: str,
     sess["difficulty"] = ai_core.coevolution_step(athlete_profile,
                                                   sess["difficulty"])
 
-    # Opponent generation (pure-Python reflex by default).
+    # Opponent generation (pure-Python reflex by default). The opponent is
+    # sent as data only — the CLIENT draws the ghost overlay (toggleable), so
+    # it is never baked into the debug frame (avoids double-drawn stickmen).
     norm_pose = [{"x": k["x"] / w, "y": k["y"] / h, "score": k["score"]}
                  for k in draw_kps] if draw_kps else []
     opponent = ai_core.generate_opponent(norm_pose, sess["latent"],
                                          sess["difficulty"])
-    if opponent:
-        opp_scaled = scale_keypoints_to_frame(opponent, w, h, norm=True)
-        draw_opponent(debug, opp_scaled)
 
     feedback = build_feedback(sess, draw_kps)
     # Merge the coach's advice into the feedback shown to the trainee.
     if coach.get("advice"):
         feedback["notes"] = (coach["advice"] + feedback.get("notes", []))[:3]
     latency_ms = (time.perf_counter() - t0) * 1000.0
+
+    # Compact debug frame: half resolution + lower quality keeps the
+    # WebSocket light on phones.
+    if w > 160 and h > 120:
+        import cv2
+        debug_small = cv2.resize(debug, (w // 2, h // 2),
+                                 interpolation=cv2.INTER_AREA)
+    else:
+        debug_small = debug
+    debug_b64 = base64.b64encode(jpeg_bytes(debug_small, 50)).decode("ascii")
 
     payload = {
         "type": "frame",
@@ -404,7 +411,7 @@ async def process_frame(websocket: WebSocket, client_id: str,
         "difficulty": round(sess["difficulty"], 2),
         "latency_ms": round(latency_ms, 2),
         "backend": ai_core.backend,
-        "debug_frame": base64.b64encode(jpeg_bytes(debug, 65)).decode("ascii"),
+        "debug_frame": debug_b64,
     }
     await websocket.send_json(payload)
 

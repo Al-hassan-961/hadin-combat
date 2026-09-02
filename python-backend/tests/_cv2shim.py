@@ -101,6 +101,10 @@ def contourArea(c):
     return 10000.0
 
 
+def countNonZero(mask):
+    return int(np.count_nonzero(mask))
+
+
 def boundingRect(c):
     x, y = int(c[:, 0].min()), int(c[:, 1].min())
     w = int(c[:, 0].max()) - x
@@ -122,6 +126,7 @@ cv2.morphologyEx = morphologyEx
 cv2.getStructuringElement = getStructuringElement
 cv2.findContours = findContours
 cv2.contourArea = contourArea
+cv2.countNonZero = countNonZero
 cv2.boundingRect = boundingRect
 
 
