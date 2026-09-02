@@ -309,6 +309,21 @@ body {
     border-color: var(--neon-dim);
     color: var(--neon);
 }
+/* View toggles row (skeleton / ghost / mirror) */
+.controls-toggles {
+    border-top: none;
+    padding-top: 0;
+    flex-wrap: wrap;
+}
+.controls-toggles .btn {
+    flex: 1 1 auto;
+    min-width: 96px;
+    padding: 10px 8px;
+    font-size: 0.78rem;
+}
+.controls-toggles .btn:not(.btn-active) {
+    opacity: 0.55;
+}
 
 /* ---- Footer ------------------------------------------------------------- */
 .app-footer {

@@ -37,6 +37,8 @@
     let ws = null;
     let running = false;
     let showOpponent = true;
+    let showSkeleton = true;
+    let mirrorView = true;
     let stream = null;
     let captureTimer = null;
     let lastFrameTime = 0;
@@ -168,6 +170,14 @@
     }
 
     // ---- Frame capture -----------------------------------------------------
+    function applyViewTransforms() {
+        // Mirror (selfie) view: flip both the video and the overlay canvas so
+        // they always match each other.
+        const t = mirrorView ? 'scaleX(-1)' : 'none';
+        if (els.video) els.video.style.transform = t;
+        if (els.overlay) els.overlay.style.transform = t;
+    }
+
     function captureLoop() {
         // 10 fps keeps the phone CPU, WebSocket and analysis smooth.
         const FPS = 10;
@@ -179,9 +189,11 @@
             canvas.width = els.video.videoWidth || 320;
             canvas.height = els.video.videoHeight || 240;
             const c = canvas.getContext('2d');
-            // Un-mirror for the server so coordinates match raw pixels.
-            c.translate(canvas.width, 0);
-            c.scale(-1, 1);
+            if (mirrorView) {
+                // Un-mirror for the server so coordinates match raw pixels.
+                c.translate(canvas.width, 0);
+                c.scale(-1, 1);
+            }
             c.drawImage(els.video, 0, 0);
             canvas.toBlob((blob) => {
                 if (ws && ws.readyState === WebSocket.OPEN) {
@@ -211,17 +223,17 @@
         els.overlay.width = w;
         els.overlay.height = h;
 
-        // Base debug frame sent by the server (athlete skeleton already drawn).
+        // Base debug frame sent by the server (raw video, no overlays baked in).
         if (msg.debug_frame) {
             const img = new Image();
             img.onload = () => ctx.drawImage(img, 0, 0, w, h);
             img.src = 'data:image/jpeg;base64,' + msg.debug_frame;
-        } else if (msg.keypoints) {
-            drawSkeleton(msg.keypoints, w, h);
         }
 
-        // Opponent ghost overlay — drawn client-side so it can be toggled off
-        // (the server no longer bakes it into the debug frame).
+        // Client-side overlays so the user can toggle each one on/off.
+        if (showSkeleton && msg.keypoints && msg.keypoints.length) {
+            drawSkeleton(msg.keypoints, w, h);
+        }
         if (showOpponent && msg.opponent && msg.opponent.length) {
             drawOpponent(msg.opponent, w, h);
         }
@@ -385,15 +397,28 @@
         }
     });
 
-    // Ghost (opponent) toggle — avoids a confusing second stickman when off.
-    els.ghostBtn = els.ghostBtn || document.getElementById('ghostBtn');
-    if (els.ghostBtn) {
-        els.ghostBtn.addEventListener('click', () => {
-            showOpponent = !showOpponent;
-            els.ghostBtn.textContent = showOpponent ? '👻 Ghost: on' : '👻 Ghost: off';
-            els.ghostBtn.classList.toggle('btn-active', showOpponent);
+    // ---- View toggles: skeleton / ghost / mirror ----------------------------
+    function bindToggle(id, get, set, onLabel, offLabel) {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        const refresh = () => {
+            const on = get();
+            btn.textContent = on ? onLabel : offLabel;
+            btn.classList.toggle('btn-active', on);
+        };
+        btn.addEventListener('click', () => {
+            set(!get());
+            if (id === 'mirrorBtn') applyViewTransforms();
+            refresh();
         });
+        refresh();
     }
+    bindToggle('skeletonBtn', () => showSkeleton, (v) => { showSkeleton = v; },
+               '🦴 Skeleton: on', '🦴 Skeleton: off');
+    bindToggle('ghostBtn', () => showOpponent, (v) => { showOpponent = v; },
+               '👻 Ghost: on', '👻 Ghost: off');
+    bindToggle('mirrorBtn', () => mirrorView, (v) => { mirrorView = v; },
+               '🪞 Mirror: on', '🪞 Mirror: off');
 
     // ---- Connection / share bar ---------------------------------------------
     function setupConnectBar() {
@@ -434,6 +459,7 @@
 
     // ---- Init -----------------------------------------------------------------
     setupConnectBar();
+    applyViewTransforms();
     pollHealth();
     setInterval(pollHealth, 10000);
 

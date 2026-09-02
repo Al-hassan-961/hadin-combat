@@ -43,7 +43,6 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from .camera_processor import (
     cv2_info,
     decode_jpeg_frame,
-    draw_skeleton,
     jpeg_bytes,
 )
 from .engine import (
@@ -368,9 +367,9 @@ async def process_frame(websocket: WebSocket, client_id: str,
         movements = sess["movement"].analyze()
         coach = sess["coach"].update(movements)
 
-    # Debug frame with skeleton overlay.
+    # Debug frame: RAW frame (no overlays baked in). The client draws the
+    # skeleton and ghost overlays itself, so the user can toggle them on/off.
     debug = frame.copy()
-    draw_skeleton(debug, draw_kps)
 
     # Co-evolution drives difficulty.
     sess["difficulty"] = ai_core.coevolution_step(athlete_profile,
