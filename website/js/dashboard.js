@@ -133,7 +133,8 @@
 
         // ---- Accuracy + efficiency / reaction (new, additive) -------------------
         barChart(els.acc, history.map((_, i) => 'S' + (i + 1)),
-            history.map((h) => h.avg_quality || 0), '#00ffc8');
+            history.map((h) => h.accuracy_pct !== undefined ? h.accuracy_pct
+                        : (h.avg_quality || 0)), '#00ffc8');
         lineChart(els.eff,
             { a: history.map((h) => h.strikes_per_min || 0),
               b: history.map((h) => (h.reaction_s || 0) * 100) },  // *100 to share scale

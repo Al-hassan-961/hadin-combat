@@ -94,3 +94,40 @@ def test_performance_and_suggestions():
     assert performance_score(1.0, 90, 2.0, 10) >= performance_score(0.2, 40, 0.2, 90)
     tips = improvement_suggestions("jab", 0.5, 70, 1.5, 60)
     assert any("clean-technique" in t or "rate" in t for t in tips)
+
+
+def test_job_manager_unknown_job():
+    from app.video_analyzer import VideoJobManager
+    mgr = VideoJobManager(lambda f: None)
+    job = mgr.get("does-not-exist")
+    assert job["status"] == "missing"
+
+
+def test_upload_allowed_extensions():
+    from app.main import _ALLOWED_VIDEO_EXTS
+    assert {".mp4", ".mov", ".avi"}.issubset(_ALLOWED_VIDEO_EXTS)
+    assert ".exe" not in _ALLOWED_VIDEO_EXTS
+
+
+def test_compose_summary_via_main_helpers():
+    """Simulate the live-session archive path (quality_list -> landed/accuracy)."""
+    from app.main import _compose_session_summary
+    sess = {
+        "started": __import__("time").time(),
+        "frames": 100,
+        "profile": "aggressive",
+        "_strikes_seen": 10,
+        "quality_list": [[85, 0.9], [90, 0.95], [40, 0.4], [75, 0.7]] * 2 + [[50, 0.5]],
+        "fatigue_progression": [[0, 5], [30, 40], [60, 70]],
+    }
+    from app.coach import CoachEngine, MovementAnalyzer
+    sess["coach"] = CoachEngine()
+    sess["coach"].counts = {"jab": 6, "hook": 3, "front_kick": 1}
+    sess["fatigue"] = type("F", (), {"score": lambda self: {"score": 70}})()
+    s = _compose_session_summary("t1", sess)
+    assert s["total_strikes"] == 10
+    assert s["landed"] >= 6     # quality>=70 or conf>=0.6 entries
+    assert s["accuracy_pct"] == round(100 * s["landed"] / 10)
+    assert s["most_used"] == "jab"
+    assert 0 <= s["performance"] <= 100
+    assert s["source"] == "live"

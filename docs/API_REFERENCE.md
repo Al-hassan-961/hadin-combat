@@ -109,6 +109,32 @@ second over the recent window) and `advice` (rotating professional coaching tips
 { "type": "error", "message": "Bad JSON" }
 ```
 
+**`profile_ack`** — after a `set_profile` control message:
+```json
+{ "type": "profile_ack", "profile": "counter_puncher" }
+```
+
+**`match_summary`** — sent in reply to the `{"type":"summary"}` control message
+(when the user stops a session). Carries the full match summary: `total_strikes`,
+`landed`, `accuracy_pct`, `most_used`, `reaction_s`, `performance`, `duration_s`,
+`fatigue_curve`, `suggestions`, `source`, `title`, plus `type`.
+
+**`ping`** — server keep-alive every 20 s; clients should ignore it.
+
+**`frame` analysis block** — every frame payload also carries `analysis`:
+
+```json
+"analysis": {
+  "strike": { "type": "jab", "side": "left", "confidence_pct": 82, "quality": 76 },
+  "fatigue_score": 34, "fatigue_level": "moderate",
+  "profile": "Aggressive",
+  "elapsed_s": 92.4, "round": 1, "phase": "round", "phase_remain": 88,
+  "speed_band": "medium",
+  "tip": "Extend the jab fully…",
+  "action": "Jab thrown — good form!"
+}
+```
+
 ---
 
 ## REST Endpoints
@@ -148,9 +174,14 @@ suggestions:
 ```json
 {
   "history": [
-    { "client_id": "web-x", "duration_s": 180, "frames": 1800,
+    { "client_id": "web-x", "source": "live", "title": "live session",
+      "ended": 1725300000, "duration_s": 180, "frames": 1800,
       "profile": "counter_puncher", "techniques": { "jab": 24, "hook": 9 },
-      "total_strikes": 33, "fatigue": 62 }
+      "total_strikes": 33, "landed": 26, "accuracy_pct": 79,
+      "most_used": "jab", "reaction_s": 0.9, "performance": 84,
+      "fatigue": 62, "final_fatigue": 62, "strikes_per_min": 11,
+      "fatigue_curve": [[0, 5], [60, 30], [120, 45]],
+      "suggestions": ["..."] }
   ],
   "improvement": [
     "Your most-used technique is jab (24 reps) — drill it into sharper, faster reps.",
@@ -159,10 +190,31 @@ suggestions:
 }
 ```
 
+Both live sessions (`source: "live"`) and completed video analyses
+(`source: "video"`) appear here with timestamps for the dashboard's Session
+History. History is bounded to the most recent 20 entries.
+
 ### `GET /api/session/{client_id}`
 
 Live view of an active session (`live: true`) or the last matching completed
 session (`live: false`); `404` if not found.
+
+### `POST /api/analyze`
+
+Upload a pre-recorded sparring video for **offline analysis** (multipart form,
+field `file`; MP4/MOV/AVI). Returns immediately:
+
+```json
+{ "job_id": "b451f0012488", "filename": "spar.mp4" }
+```
+
+### `GET /api/analyze/{job_id}`
+
+Poll the analysis job — `queued` / `processing` / `done` / `error`, with
+`progress` 0–100. On completion, `result` contains `timeline` (every detected
+technique: `t`, `type`, `side`, `confidence`, `quality`), `fatigue_curve`,
+`techniques`, `duration_s` and `summary`. Completed video results are archived
+into `/api/history` (`source: "video"`) exactly once.
 
 ### Static assets
 
