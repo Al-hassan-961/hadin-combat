@@ -17,12 +17,17 @@ A raw JPEG byte payload is decoded to a frame and processed.
 
 | `type` | Payload | Description |
 |---|---|---|
-| `reset` | `{}` | Reset difficulty to `0.4` and clear frame counter. |
+| `reset` | `{}` | Reset difficulty to `0.4`, clear frame counter, coach & fatigue state. |
+| `set_profile` | `{"profile": "aggressive"}` | Switch the sparring-partner AI profile mid-session. |
 | `feedback_text` | `{"text": "..."}` | Echo a custom coaching message back. |
+
+Profiles: `balanced`, `aggressive`, `counter_puncher`, `defensive`,
+`pressure_fighter` (see `app/profiles.py`).
 
 Example:
 ```json
 { "type": "reset" }
+{ "type": "set_profile", "profile": "counter_puncher" }
 ```
 
 ### Server → Client
@@ -64,19 +69,25 @@ Example:
   },
   "difficulty": 0.41,
   "latency_ms": 31.2,
-  "backend": "cpp",
-  "debug_frame": "<base64-jpeg>"
+  "backend": "cpp"
 }
 ```
 
-**`movements`** — detected martial-arts techniques this frame
-(`jab`, `cross`, `hook`, `uppercut`, `front_kick`, `roundhouse_kick`,
-`knee_raise`, `block`, `guard`, `stance`), each with `side`, `quality` (0–100)
-and `advice`.
+**`movements`** — detected martial-arts techniques this frame (basic:
+`jab`, `cross`, `hook`, `uppercut`, `front_kick`, `roundhouse_kick`,
+`knee_raise`; complex: `superman_punch`, `spinning_backfist`, `axe_kick`,
+`question_mark_kick`; plus `block`, `guard`, `stance`), each with `side`,
+`quality` (0–100), a `confidence` score (0–1) and `advice`.
 
 **`coach`** — session coaching summary: `last` (most recent technique),
 `counts` (per-technique counters), `total_strikes`, `tempo_per_s` (strikes per
 second over the recent window) and `advice` (rotating professional coaching tips).
+
+**`fatigue`** — real-time fatigue: `score` (0–100), `level`
+(`fresh`/`moderate`/`fatigued`), per-component `components`
+(`snap`, `reaction`, `stability`) and recovery `advice`.
+
+**`profile`** — human-readable label of the active sparring-partner AI profile.
 
 **`feedback`** — custom message:
 ```json
@@ -129,10 +140,33 @@ Returns backend status, active sessions, and athlete profile:
 }
 ```
 
+### `GET /api/history`
+
+Completed session summaries (bounded) plus personalised improvement
+suggestions:
+
+```json
+{
+  "history": [
+    { "client_id": "web-x", "duration_s": 180, "frames": 1800,
+      "profile": "counter_puncher", "techniques": { "jab": 24, "hook": 9 },
+      "total_strikes": 33, "fatigue": 62 }
+  ],
+  "improvement": [
+    "Your most-used technique is jab (24 reps) — drill it into sharper, faster reps.",
+    "Sessions end quite fatigued — add short breaks between rounds."
+  ]
+}
+```
+
+### `GET /api/session/{client_id}`
+
+Live view of an active session (`live: true`) or the last matching completed
+session (`live: false`); `404` if not found.
+
 ### Static assets
 
-- `GET /static/*` — when a local `static/` copy exists (otherwise the website
-  directory at the repo root is served directly).
+- The website (incl. `/dashboard.html`) is served at the site root.
 
 ---
 

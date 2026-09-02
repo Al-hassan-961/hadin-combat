@@ -57,7 +57,11 @@ flowchart LR
 
 - 🧬 **Fighting DNA Extraction** — your movement style is encoded into a reusable latent fingerprint.
 - 🥊 **Adaptive Opponent** — the AI opponent adapts stance, tempo, and defense to counter you.
-- 🧠 **AI Coach** — real-time martial-arts movement detection (jab, cross, hook, uppercut, front/roundhouse kicks, guard, stance) with technique counters, quality scoring, tempo and rotating professional coaching advice (`app/coach.py`).
+- 🧠 **AI Coach** — real-time martial-arts movement detection (jab, cross, hook, uppercut, front/roundhouse kicks, **superman punch, spinning backfist, axe kick, question-mark kick**, guard, stance) each with a confidence score, plus technique counters, quality scoring, tempo and rotating professional coaching advice (`app/coach.py`).
+- 😮‍💨 **Fatigue analysis** — real-time fatigue score 0–100 from strike-speed decay, reaction slowing and stance wobble, with recovery advice (`app/fatigue.py`).
+- 🤖 **Sparring AI profiles** — switch mid-session between Balanced / Aggressive / Counter-Puncher / Defensive / Pressure Fighter opponents (`app/profiles.py`).
+- 📈 **Performance dashboard** — post-training charts for technique mix, fatigue trend and profile usage, with personalised improvement suggestions (`/dashboard.html`, `/api/history`).
+- 🔊 **Voice coaching** — real-time verbal feedback via the browser's speech synthesis (optional toggle).
 - 🔄 **Co-Evolution** — both you and the AI improve session over session.
 - 📱 **Mobile-First** — thumb-friendly neon UI, works on any browser.
 - 🚀 **One-Command Setup** on Android (Termux) — no manual steps.

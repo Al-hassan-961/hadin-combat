@@ -260,6 +260,48 @@ body {
 .chip b { color: var(--neon); }
 .chip-dim { color: var(--muted); }
 
+/* ---- Fatigue meter + sparring profile -------------------------------------- */
+.fatigue-row, .profile-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+.fatigue-label { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
+.fatigue-bar {
+    flex: 1;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+    min-width: 90px;
+}
+.fatigue-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background: var(--neon);
+    transition: width 0.4s ease, background 0.4s ease;
+}
+.fatigue-val { font-weight: 800; font-size: 0.9rem; min-width: 22px; text-align: right; }
+.fatigue-level { font-size: 0.7rem; color: var(--neon); text-transform: capitalize; }
+.profile-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-btn {
+    cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: var(--bg-2);
+    color: var(--text);
+    font-size: 0.72rem;
+    padding: 5px 9px;
+    border-radius: 999px;
+}
+.chip-btn.chip-active {
+    border-color: var(--neon);
+    color: var(--neon);
+    background: rgba(0, 255, 200, 0.12);
+}
+
 .feedback-list { list-style: none; }
 .feedback-list li {
     padding: 8px 10px;
@@ -337,3 +379,32 @@ body {
 }
 .app-footer .creators { margin-top: 4px; }
 .app-footer a { color: var(--neon); text-decoration: none; }
+
+/* ---- Dashboard ------------------------------------------------------------ */
+.cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.card {
+    background: var(--panel);
+    border-radius: var(--radius);
+    padding: 14px;
+    text-align: center;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.card-num { font-size: 1.6rem; font-weight: 800; color: var(--neon); }
+.card-label { font-size: 0.7rem; color: var(--muted); }
+.panel {
+    background: var(--panel);
+    border-radius: var(--radius);
+    padding: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.panel h2 { font-size: 0.95rem; margin-bottom: 10px; }
+.panel canvas { width: 100%; height: auto; }
+.session-list { list-style: none; }
+.session-list li {
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    border-left: 3px solid var(--neon);
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 8px;
+    font-size: 0.8rem;
+}

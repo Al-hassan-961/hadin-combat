@@ -44,14 +44,33 @@
     let lastFrameTime = 0;
     let framesInWindow = 0;
     let fpsWindowStart = 0;
+    let reconnectDelay = 800;
+    let voiceOn = false;
+    let lastSpoken = '';
+    let lastTechniqueType = null;
 
-    // ---- WebSocket connection with auto-reconnect -------------------------
+    // ---- Text-to-speech voice coaching (Web Speech API) -------------------
+    function speak(text) {
+        if (!voiceOn || !('speechSynthesis' in window)) return;
+        const clean = (text || '').replace(/[^\w\s.,'’\-:!]/g, ' ').trim();
+        if (!clean || clean === lastSpoken) return;
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(clean);
+        u.rate = 1.0;
+        u.pitch = 1.0;
+        window.speechSynthesis.speak(u);
+        lastSpoken = clean;
+        setTimeout(() => { lastSpoken = ''; }, 4000);
+    }
+
+    // ---- WebSocket connection with auto-reconnect (backoff) -----------------
     function connect() {
         const proto = location.protocol === 'https:' ? 'wss' : 'ws';
         const url = `${proto}://${location.host}/ws/${CLIENT_ID}`;
         ws = new WebSocket(url);
 
         ws.onopen = () => {
+            reconnectDelay = 800;             // reset backoff on success
             setPill('connected', 'cpp');
             addFeedback('Session connected. Ready to train.');
         };
@@ -60,7 +79,8 @@
 
         ws.onclose = () => {
             setPill('reconnecting…', 'none');
-            setTimeout(connect, 1500);
+            setTimeout(connect, reconnectDelay);
+            reconnectDelay = Math.min(8000, reconnectDelay * 1.8);  // backoff
         };
 
         ws.onerror = () => ws.close();
@@ -74,9 +94,12 @@
             return;
         }
 
+        if (msg.type === 'ping') return;          // server keep-alive
+
         if (msg.type === 'hello') {
             setPill(msg.backend, msg.backend);
             addFeedback(msg.message);
+            if (msg.profiles) initProfileChips(msg.profiles);
             return;
         }
         if (msg.type === 'frame') {
@@ -88,6 +111,9 @@
         }
         if (msg.type === 'reset_ack') {
             addFeedback('Difficulty reset to ' + Math.round(msg.difficulty * 100) + '%.');
+        }
+        if (msg.type === 'profile_ack') {
+            addFeedback('Sparring profile: ' + (msg.profile || '') + '.');
         }
         if (msg.type === 'error') {
             addFeedback('⚠ ' + (msg.message || 'Unknown error'));
@@ -262,7 +288,13 @@
         if (msg.coach) {
             updateCoachMove(msg.coach);
             updateCoachCounts(msg.coach);
+            const last = msg.coach.last;
+            if (last && last.type && last.type !== lastTechniqueType) {
+                lastTechniqueType = last.type;
+                if (last.advice && last.advice[0]) speak(last.advice[0]);
+            }
         }
+        if (msg.fatigue) updateFatigue(msg.fatigue);
     }
 
     function drawSkeleton(kps) {
@@ -367,6 +399,59 @@
             : '<span class="chip chip-dim">no techniques yet</span>';
     }
 
+    // ---- Sparring profile selector -----------------------------------------
+    function initProfileChips(profiles) {
+        els.profileChips = els.profileChips || document.getElementById('profileChips');
+        if (!els.profileChips) return;
+        const names = Array.isArray(profiles)
+            ? profiles : ['balanced', 'aggressive', 'counter_puncher', 'defensive', 'pressure_fighter'];
+        const pretty = { balanced: '🥊 Balanced', aggressive: '🔥 Aggressive',
+            counter_puncher: '🛡️ Counter', defensive: '🧱 Defensive',
+            pressure_fighter: '🚀 Pressure' };
+        els.profileChips.innerHTML = '';
+        names.forEach((p) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'chip chip-btn';
+            b.dataset.profile = p;
+            b.textContent = pretty[p] || p;
+            b.addEventListener('click', () => selectProfile(p));
+            els.profileChips.appendChild(b);
+        });
+        // default active = balanced
+        els.profileChips.querySelectorAll('.chip-btn').forEach((c) =>
+            c.classList.toggle('chip-active', c.dataset.profile === 'balanced'));
+    }
+
+    function selectProfile(profile) {
+        els.profileChips = els.profileChips || document.getElementById('profileChips');
+        if (els.profileChips) {
+            els.profileChips.querySelectorAll('.chip-btn').forEach((c) =>
+                c.classList.toggle('chip-active', c.dataset.profile === profile));
+        }
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'set_profile', profile }));
+        }
+    }
+
+    // ---- Fatigue meter -------------------------------------------------------
+    function updateFatigue(fatigue) {
+        els.fatigueFill = els.fatigueFill || document.getElementById('fatigueFill');
+        els.fatigueVal = els.fatigueVal || document.getElementById('fatigueVal');
+        els.fatigueLevel = els.fatigueLevel || document.getElementById('fatigueLevel');
+        if (!els.fatigueFill || !fatigue) return;
+        const s = fatigue.score || 0;
+        els.fatigueFill.style.width = s + '%';
+        els.fatigueFill.style.background =
+            s < 30 ? 'var(--neon)' : s < 60 ? '#ffd166' : 'var(--accent)';
+        if (els.fatigueVal) els.fatigueVal.textContent = s;
+        if (els.fatigueLevel) {
+            els.fatigueLevel.textContent = fatigue.level || 'fresh';
+            els.fatigueLevel.style.color =
+                s < 30 ? 'var(--neon)' : s < 60 ? '#ffd166' : 'var(--accent)';
+        }
+    }
+
     function updateFeedback(fb) {
         els.grade.textContent = fb.grade || 'C';
         els.grade.className = 'grade ' + (fb.grade || 'c').toLowerCase();
@@ -435,11 +520,17 @@
         refresh();
     }
     bindToggle('skeletonBtn', () => showSkeleton, (v) => { showSkeleton = v; },
-               '🦴 Skeleton: on', '🦴 Skeleton: off');
+               '🦴 Skeleton', '🦴 Skeleton');
     bindToggle('ghostBtn', () => showOpponent, (v) => { showOpponent = v; },
-               '👻 Ghost: on', '👻 Ghost: off');
+               '👻 Ghost', '👻 Ghost');
     bindToggle('mirrorBtn', () => mirrorView, (v) => { mirrorView = v; },
-               '🪞 Mirror: on', '🪞 Mirror: off');
+               '🪞 Mirror', '🪞 Mirror');
+    bindToggle('voiceBtn', () => voiceOn, (v) => { voiceOn = v; },
+               '🔊 Voice', '🔇 Voice');
+    // Prime the TTS engine on first user gesture (autoplay policies).
+    document.addEventListener('click', () => {
+        if ('speechSynthesis' in window) window.speechSynthesis.getVoices();
+    }, { once: true });
 
     // ---- Connection / share bar ---------------------------------------------
     function setupConnectBar() {

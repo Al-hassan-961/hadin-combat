@@ -58,6 +58,18 @@
                 <span class="grade" id="grade">C</span>
             </div>
 
+            <!-- Fatigue meter + sparring profile -->
+            <div class="fatigue-row">
+                <span class="fatigue-label">😮‍💨 Fatigue</span>
+                <div class="fatigue-bar"><div class="fatigue-fill" id="fatigueFill" style="width:0%"></div></div>
+                <span class="fatigue-val" id="fatigueVal">0</span>
+                <span class="fatigue-level" id="fatigueLevel">fresh</span>
+            </div>
+            <div class="profile-row">
+                <span class="fatigue-label">🤖 Sparring</span>
+                <div class="profile-chips" id="profileChips"></div>
+            </div>
+
             <!-- Detected technique + quality -->
             <div class="coach-move" id="coachMove">
                 <span class="coach-move-name" id="moveName">—</span>
@@ -80,13 +92,14 @@
     <nav class="controls">
         <button id="startBtn" class="btn btn-primary">▶ Start</button>
         <button id="resetBtn" class="btn btn-ghost">↺ Reset</button>
-        <a href="/api/stats" class="btn btn-ghost">📊 Stats</a>
+        <a href="/dashboard.html" class="btn btn-ghost">📈 Dashboard</a>
     </nav>
     <!-- View toggles -->
     <nav class="controls controls-toggles">
-        <button id="skeletonBtn" class="btn btn-ghost btn-active">🦴 Skeleton: on</button>
-        <button id="ghostBtn" class="btn btn-ghost">👻 Ghost: off</button>
-        <button id="mirrorBtn" class="btn btn-ghost">🪞 Mirror: off</button>
+        <button id="skeletonBtn" class="btn btn-ghost btn-active">🦴 Skeleton</button>
+        <button id="ghostBtn" class="btn btn-ghost">👻 Ghost</button>
+        <button id="mirrorBtn" class="btn btn-ghost">🪞 Mirror</button>
+        <button id="voiceBtn" class="btn btn-ghost">🔊 Voice</button>
     </nav>
 
     <footer class="app-footer">

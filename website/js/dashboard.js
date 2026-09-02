@@ -3,93 +3,127 @@
  * Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
  * All rights reserved.
  *
- * Fetches backend stats from /api/stats and renders a lightweight
- * real-time dashboard using the Canvas API (no external chart library).
- * Load this script on a separate dashboard page.
+ * Performance dashboard: fetches /api/history + /api/stats and renders
+ * lightweight canvas charts (strike mix, fatigue trend, profile usage) plus
+ * personalised improvement suggestions. No external chart library.
  */
 (function () {
     'use strict';
 
-    const REFRESH_MS = 2000;
-    const history = [];
-    const MAX_POINTS = 60;
+    const TECHNIQUES = ['jab', 'cross', 'hook', 'uppercut', 'front_kick',
+        'roundhouse_kick', 'superman_punch', 'spinning_backfist',
+        'axe_kick', 'question_mark_kick'];
+    const TECH_ICONS = { jab: '👊', cross: '👊', hook: '🥊', uppercut: '🥊',
+        front_kick: '🦵', roundhouse_kick: '🦵', superman_punch: '🦸',
+        spinning_backfist: '🌀', axe_kick: '🪓', question_mark_kick: '❓' };
+    const PROFILE_PRETTY = {
+        balanced: 'Balanced', aggressive: 'Aggressive',
+        counter_puncher: 'Counter-Puncher', defensive: 'Defensive',
+        pressure_fighter: 'Pressure Fighter',
+    };
 
-    let canvas, ctx, statsEl;
+    const els = {
+        sessions: document.getElementById('statSessions'),
+        strikes: document.getElementById('statStrikes'),
+        time: document.getElementById('statTime'),
+        fatigue: document.getElementById('statFatigue'),
+        tech: document.getElementById('chartTechniques'),
+        fat: document.getElementById('chartFatigue'),
+        prof: document.getElementById('chartProfiles'),
+        improv: document.getElementById('improvementList'),
+        sessionsList: document.getElementById('sessionList'),
+    };
 
-    function ready(fn) {
-        if (document.readyState !== 'loading') fn();
-        else document.addEventListener('DOMContentLoaded', fn);
-    }
-
-    ready(() => {
-        canvas = document.getElementById('chart');
-        statsEl = document.getElementById('stats');
-        if (canvas) ctx = canvas.getContext('2d');
-        poll();
-        setInterval(poll, REFRESH_MS);
-    });
-
-    async function poll() {
-        try {
-            const res = await fetch('/api/stats');
-            const data = await res.json();
-            renderStats(data);
-            renderChart(data);
-        } catch (err) {
-            console.error('dashboard poll failed:', err);
-        }
-    }
-
-    function renderStats(data) {
-        if (!statsEl) return;
-        const html = [
-            `Backend: <b>${data.backend || 'n/a'}</b>`,
-            `Active sessions: <b>${(data.sessions || []).length}</b>`,
-            `Latency target: <b>${data.latency_target_ms || '—'} ms</b>`,
-        ].join(' · ');
-        statsEl.innerHTML = html;
-    }
-
-    function renderChart(data) {
-        if (!ctx || !canvas) return;
-        const sessions = data.sessions || [];
-        const total = sessions.reduce((acc, s) => acc + (s.frames || 0), 0);
-        history.push({ t: Date.now(), total });
-        if (history.length > MAX_POINTS) history.shift();
-
+    function barChart(canvas, labels, values, color) {
+        if (!canvas || !canvas.getContext) return;
+        const ctx = canvas.getContext('2d');
         const W = canvas.width, H = canvas.height;
         ctx.clearRect(0, 0, W, H);
-
-        // Grid
-        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
         ctx.lineWidth = 1;
         for (let i = 1; i < 5; i++) {
             const y = (H / 5) * i;
-            ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(W, y);
-            ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(28, y); ctx.lineTo(W - 8, y); ctx.stroke();
         }
-
-        if (history.length < 2) {
+        const max = Math.max(1, ...values);
+        const n = labels.length;
+        const slot = (W - 30) / Math.max(1, n);
+        const bw = Math.min(slot * 0.6, 26);
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        labels.forEach((lab, i) => {
+            const x = 16 + slot * i + slot / 2;
+            const bh = (values[i] / max) * (H - 30);
+            ctx.fillStyle = color;
+            ctx.fillRect(x - bw / 2, H - 20 - bh, bw, bh);
             ctx.fillStyle = '#8a8aa3';
-            ctx.font = '13px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('Collecting data…', W / 2, H / 2);
-            return;
+            ctx.fillText(lab, x, H - 7);
+        });
+    }
+
+    async function refresh() {
+        let data = { history: [], improvement: [] };
+        try {
+            const r = await fetch('/api/history');
+            data = await r.json();
+        } catch (_) { /* offline */ }
+
+        const history = data.history || [];
+
+        // ---- Summary cards --------------------------------------------------
+        let strikes = 0, duration = 0, fatigueSum = 0;
+        const techCounts = {};
+        const profileCounts = {};
+        history.forEach((h) => {
+            strikes += h.total_strikes || 0;
+            duration += h.duration_s || 0;
+            fatigueSum += h.fatigue || 0;
+            const p = h.profile || 'balanced';
+            profileCounts[p] = (profileCounts[p] || 0) + 1;
+            Object.entries(h.techniques || {}).forEach(([t, c]) => {
+                techCounts[t] = (techCounts[t] || 0) + c;
+            });
+        });
+        if (els.sessions) els.sessions.textContent = history.length;
+        if (els.strikes) els.strikes.textContent = strikes;
+        if (els.time) els.time.textContent = Math.round(duration / 60);
+        if (els.fatigue) {
+            els.fatigue.textContent = history.length ? Math.round(fatigueSum / history.length) : 0;
         }
 
-        const max = Math.max(1, ...history.map((p) => p.total));
-        const pad = 8;
-        ctx.strokeStyle = '#00ffc8';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        history.forEach((p, i) => {
-            const x = pad + (i / (MAX_POINTS - 1)) * (W - pad * 2);
-            const y = H - pad - (p.total / max) * (H - pad * 2);
-            if (i === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
+        // ---- Charts -------------------------------------------------------------
+        barChart(els.tech, TECHNIQUES.map((t) => TECH_ICONS[t] || t),
+            TECHNIQUES.map((t) => techCounts[t] || 0), '#00ffc8');
+        barChart(els.fat, history.map(() => ''), history.map((h) => h.fatigue || 0), '#ff285c');
+        const pk = Object.keys(profileCounts);
+        barChart(els.prof, pk.map((k) => (PROFILE_PRETTY[k] || k).slice(0, 6)),
+            pk.map((k) => profileCounts[k]), '#ffd166');
+
+        // ---- Improvement --------------------------------------------------------
+        const tips = (data.improvement && data.improvement.length)
+            ? data.improvement : ['Complete a session to receive personalised tips.'];
+        els.improv.innerHTML = '';
+        tips.slice(0, 3).forEach((tip) => {
+            const li = document.createElement('li');
+            li.textContent = tip;
+            els.improv.appendChild(li);
         });
-        ctx.stroke();
+
+        // ---- Recent sessions ------------------------------------------------------
+        els.sessionsList.innerHTML = '';
+        history.slice().reverse().slice(0, 6).forEach((h) => {
+            const li = document.createElement('li');
+            const t = TECHNIQUES.reduce((a, k) => a + (h.techniques?.[k] || 0), 0);
+            const when = new Date((h.ended || 0) * 1000).toLocaleTimeString([], {
+                hour: '2-digit', minute: '2-digit' });
+            li.textContent = `${when} · ${PROFILE_PRETTY[h.profile] || h.profile} · ` +
+                `${t} strikes · fatigue ${h.fatigue || 0}`;
+            els.sessionsList.appendChild(li);
+        });
     }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        refresh();
+        setInterval(refresh, 4000);
+    });
 })();

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<!--
+ * HADIN-COMBAT – dashboard.html
+ * Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
+ * All rights reserved.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0a12" />
+    <title>HADIN-COMBAT · Performance Dashboard</title>
+    <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+    <header class="app-header">
+        <div class="brand">
+            <span class="brand-mark">🥋</span>
+            <div class="brand-text">
+                <h1>HADIN<span class="accent">-COMBAT</span></h1>
+                <p class="tagline">Performance Dashboard</p>
+            </div>
+        </div>
+        <a class="backend-pill" href="/" style="text-decoration:none">⬅ Back to training</a>
+    </header>
+
+    <main class="stage-wrap">
+        <!-- Summary cards -->
+        <section class="cards">
+            <div class="card"><div class="card-num" id="statSessions">0</div><div class="card-label">Sessions</div></div>
+            <div class="card"><div class="card-num" id="statStrikes">0</div><div class="card-label">Strikes</div></div>
+            <div class="card"><div class="card-num" id="statTime">0</div><div class="card-label">Min trained</div></div>
+            <div class="card"><div class="card-num" id="statFatigue">0</div><div class="card-label">Avg fatigue</div></div>
+        </section>
+
+        <!-- Charts -->
+        <section class="panel">
+            <h2>📊 Techniques thrown</h2>
+            <canvas id="chartTechniques" width="340" height="200"></canvas>
+        </section>
+
+        <section class="panel">
+            <h2>📉 Session fatigue trend</h2>
+            <canvas id="chartFatigue" width="340" height="180"></canvas>
+        </section>
+
+        <section class="panel">
+            <h2>🤖 Sparring profiles used</h2>
+            <canvas id="chartProfiles" width="340" height="160"></canvas>
+        </section>
+
+        <!-- Improvement suggestions -->
+        <section class="panel">
+            <h2>💡 Personalised improvement</h2>
+            <ul class="feedback-list" id="improvementList"></ul>
+        </section>
+
+        <!-- Recent sessions -->
+        <section class="panel">
+            <h2>🕘 Recent sessions</h2>
+            <ul class="session-list" id="sessionList"></ul>
+        </section>
+    </main>
+
+    <footer class="app-footer">
+        <p>© 2026 Al-hassan Shehade &amp; Dina Balcheh · HADIN-COMBAT</p>
+    </footer>
+
+    <script src="js/dashboard.js"></script>
+</body>
+</html>
