@@ -106,6 +106,9 @@ class AICore:
         self._coevolution = None  # C++ CoEvolution
         self._mp_pose = None      # MediaPipe Pose
         self._motion = None       # OpenCV motion fallback
+        # Runtime watchdog state (graceful degradation / self-recovery).
+        self._pose_misses = 0
+        self._backend_errors = 0
 
         self._load_cpp_core()
         if self.backend == "none" and FALLBACK_TO_PYTHON:
@@ -164,14 +167,52 @@ class AICore:
 
     # ---- pose estimation ----------------------------------------------------
     def pose_keypoints(self, frame: np.ndarray) -> Optional[List[Dict[str, float]]]:
-        """Return COCO-style keypoints [{"x","y","score"}] in raw pixels."""
-        if self.backend == "cpp":
-            return self._pose_cpp(frame)
-        if self.backend == "mediapipe":
-            return self._pose_mediapipe(frame)
-        if self.backend == "opencv":
-            return self._pose_motion(frame)
+        """Return COCO-style keypoints [{"x","y","score"}] in raw pixels.
+
+        Never raises: on a backend error it degrades to the next available
+        backend and continues; a long streak of misses resets the motion
+        background model so the tracker can recover from drift.
+        """
+        kps: Optional[List[Dict[str, float]]] = None
+        try:
+            if self.backend == "cpp":
+                kps = self._pose_cpp(frame)
+            elif self.backend == "mediapipe":
+                kps = self._pose_mediapipe(frame)
+            elif self.backend == "opencv":
+                kps = self._pose_motion(frame)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("HADIN: pose backend error (%s) - degrading.", exc)
+            kps = None
+            self._backend_errors += 1
+            self._degrade_if_stuck()
+
+        if kps:
+            self._pose_misses = 0
+            return kps
+
+        self._pose_misses += 1
+        # Recover the motion fallback if it has drifted (e.g. background
+        # changed or the subject left and returned).
+        if self.backend == "opencv" and self._motion is not None \
+                and self._pose_misses >= 25:
+            logger.info("HADIN: resetting motion tracker to recover.")
+            self._motion.reset()
+            self._pose_misses = 0
         return None
+
+    def _degrade_if_stuck(self) -> None:
+        if self._backend_errors < 10:
+            return
+        if self.backend == "cpp" and self._mp_pose is not None:
+            self.backend = "mediapipe"
+        elif self.backend in ("cpp", "mediapipe") and self._motion is not None:
+            self.backend = "opencv"
+        elif self.backend == "opencv" and self._motion is not None:
+            # Motion itself is failing; keep it but reset on the next miss.
+            pass
+        logger.warning("HADIN: degraded active backend to '%s'.", self.backend)
+        self._backend_errors = 0
 
     def _pose_cpp(self, frame: np.ndarray) -> Optional[List[Dict[str, float]]]:
         from .camera_processor import preprocess_frame

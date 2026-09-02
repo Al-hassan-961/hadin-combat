@@ -167,3 +167,14 @@ def test_coach_metrics_aggregates():
     assert 0 <= m["avg_quality"] <= 100
     assert m["reaction_s"] >= 0
     assert m["tempo_per_s"] >= 0
+
+
+def test_pose_pipeline_never_raises_on_bad_frame():
+    """process_frame's pose call must never throw, even on a degenerate frame."""
+    import numpy as np
+    from app.main import ai_core
+    # Blank + random-noise frames (worst-case input) must not raise.
+    for arr in (np.zeros((240, 320, 3), dtype=np.uint8),
+                np.random.randint(0, 255, (240, 320, 3), dtype=np.uint8)):
+        kps = ai_core.pose_keypoints(arr)
+        assert kps is None or isinstance(kps, list)
