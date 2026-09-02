@@ -45,6 +45,7 @@ from .camera_processor import (
     decode_jpeg_frame,
 )
 from .profiles import PROFILES, load_profile_preference
+from .strike_detector import StrikeGate, calibrate_thresholds
 from .engine import (
     MotionPoseEstimator,
     PurePythonCoEvolution,
@@ -339,6 +340,8 @@ class SessionManager:
             # Sparring-partner AI profile: start from the user's saved
             # preference (JSON), defaulting to "balanced".
             "profile": _saved_profile(),
+            "strike_gate": StrikeGate(),     # confident-strike gating
+            "_cal": None,                    # live calibration state
             # Post-session summary / live-panel accumulators.
             "quality_list": [],          # (quality, confidence) per landed strike
             "fatigue_progression": [],   # [elapsed_s, fatigue_score] samples
@@ -390,13 +393,15 @@ def _compose_session_summary(client_id: str, sess: Dict[str, Any],
         m = {}
     total = sess.get("_strikes_seen", 0)
     quality_list = sess.get("quality_list") or []
-    landed = sum(1 for q, c in quality_list if q >= 70 or c >= 0.6)
+    # "Landed" = clean technique (quality >= 70 OR very high confidence >= 0.8).
+    landed = sum(1 for q, c in quality_list if q >= 70 or c >= 0.8)
 
+    reaction = m.get("reaction_s") if total > 0 else None
     summ = build_session_summary(
         total_strikes=total, landed=landed, counts=counts,
         avg_quality=m.get("avg_quality", 0),
         tempo=m.get("tempo_per_s", 0),
-        reaction_s=m.get("reaction_s", 0.0),
+        reaction_s=reaction,
         final_fatigue=fatigue_score,
         duration_s=duration,
         fatigue_curve=sess.get("fatigue_progression") or [],
@@ -488,38 +493,41 @@ async def process_frame(websocket: WebSocket, client_id: str,
             sess["latent"] = latent
             sess["style_tags"] = tags
 
-        # Martial-arts movement detection + coaching.
+        # Martial-arts movement detection + coaching (gated so sensitivity/
+        # noise never inflates strike counts — see app/strike_detector.py).
         sess["movement"].push(norm)
         movements = sess["movement"].analyze()
-        coach = sess["coach"].update(movements)
 
-        # Movement speed (live-panel indicator): wrist/ankle displacement.
+        # Movement speed (live-panel + strike-gate signal).
         prev_norm = sess.get("_prev_norm")
-        speed_band_live = "slow"
+        speed_per_s = 0.0
         if prev_norm is not None:
             disp = _mean_joint_disp(prev_norm, norm,
                                     (L_WRIST, R_WRIST, L_ANKLE, R_ANKLE))
-            speed_band_live = speed_band(disp * 10)   # ~10 sampled fps
+            speed_per_s = disp * 10.0            # ~10 sampled fps
         sess["_prev_norm"] = norm
+        speed_band_live = speed_band(speed_per_s)
 
-        # Fatigue analysis: track stance stability each frame and feed each NEW
-        # strike once with a "snap" proxy (confidence x quality ~ explosive speed).
+        gate = sess["strike_gate"]
+        now = time.time()
+        candidate = gate.pick(movements)
+        accepted = candidate is not None and gate.accept(now, candidate, speed_per_s)
+
+        if accepted:
+            coach = sess["coach"].update([candidate], now=now)
+            sess["_strikes_seen"] = sess.get("_strikes_seen", 0) + 1
+            snap = min(1.0, speed_per_s / 2.0) if speed_per_s > 0.2 else (
+                float(candidate.get("confidence", 0.5)) * 0.5 +
+                (float(candidate.get("quality", 50)) / 100.0) * 0.5)
+            sess["fatigue"].observe_strike(snap, now)
+            sess.setdefault("quality_list", []).append(
+                [candidate.get("quality", 0), candidate.get("confidence", 0)])
+            _maybe_calibrate(websocket, client_id, sess, candidate, speed_per_s)
+        else:
+            coach = sess["coach"].update([], now=now)
+
+        # Fatigue analysis: stance stability sampled every frame.
         sess["fatigue"].observe_stance(norm)
-        prev = sess.get("_strikes_seen", 0)
-        total = coach.get("total_strikes", 0)
-        if total > prev:
-            latest = coach.get("last")
-            if latest:
-                snap = (latest.get("confidence", 0.5) * 0.5 +
-                        (latest.get("quality", 50) / 100.0) * 0.5)
-            else:
-                snap = 0.6
-            for _ in range(total - prev):
-                sess["fatigue"].observe_strike(snap)
-            if latest:
-                sess.setdefault("quality_list", []).append(
-                    [latest.get("quality", 0), latest.get("confidence", 0)])
-            sess["_strikes_seen"] = total
     else:
         speed_band_live = "slow"
     fatigue = sess["fatigue"].score()
@@ -627,6 +635,44 @@ async def process_frame(websocket: WebSocket, client_id: str,
     await websocket.send_json(payload)
 
 
+# ---------------------------------------------------------------------------
+# Strike calibration helpers (live: throw ~5 clean punches to personalise the
+# detection thresholds used by StrikeGate).
+# ---------------------------------------------------------------------------
+async def _finalize_calibration(websocket: WebSocket, client_id: str,
+                                sess: Dict[str, Any]) -> None:
+    cal = sess.get("_cal") or {}
+    try:
+        thresholds = calibrate_thresholds(cal.get("speeds", []), cal.get("confs", []))
+    except ValueError as exc:
+        sess["_cal"] = None
+        await websocket.send_json({"type": "calibration_ack",
+                                   "status": "error", "message": str(exc)})
+        return
+    sess["strike_gate"].configure(min_conf=thresholds["min_conf"],
+                                  cooldown=thresholds["cooldown"],
+                                  min_speed=thresholds["min_speed"])
+    sess["_cal"] = None
+    logger.info("calibration done for %s: %s", client_id, thresholds)
+    await websocket.send_json({"type": "calibration_done", "thresholds": thresholds})
+
+
+async def _maybe_calibrate(websocket: WebSocket, client_id: str,
+                           sess: Dict[str, Any], candidate: Dict[str, Any],
+                           speed_per_s: float) -> None:
+    """Collect a clean punch during calibration; finalise after 5."""
+    cal = sess.get("_cal")
+    if not cal:
+        return
+    conf = float(candidate.get("confidence", 0) or 0)
+    if speed_per_s < 0.4 or conf < 0.5:
+        return
+    cal.setdefault("speeds", []).append(speed_per_s)
+    cal.setdefault("confs", []).append(conf)
+    if len(cal["speeds"]) >= 5:
+        await _finalize_calibration(websocket, client_id, sess)
+
+
 async def handle_json(websocket: WebSocket, client_id: str, text: str) -> None:
     try:
         data = json.loads(text)
@@ -647,6 +693,26 @@ async def handle_json(websocket: WebSocket, client_id: str, text: str) -> None:
             sess["fatigue"].reset()
             sess["_strikes_seen"] = 0
         await websocket.send_json({"type": "reset_ack", "difficulty": 0.4})
+    elif msg_type == "calibration":
+        action = str(data.get("action", ""))
+        if action == "start" and sess:
+            sess["_cal"] = {"speeds": [], "confs": []}
+            sess["strike_gate"].reset()
+            await websocket.send_json(
+                {"type": "calibration_ack", "status": "started",
+                 "message": "Throw 5 clean punches to calibrate."})
+        elif action == "done" and sess:
+            if sess.get("_cal"):
+                await _finalize_calibration(websocket, client_id, sess)
+            else:
+                await websocket.send_json(
+                    {"type": "calibration_ack", "status": "idle",
+                     "message": "No calibration in progress."})
+        elif action == "reset" and sess:
+            sess["strike_gate"].reset()
+            sess["_cal"] = None
+            await websocket.send_json(
+                {"type": "calibration_ack", "status": "reset"})
     elif msg_type == "set_profile":
         from .profiles import PROFILE_NAMES, save_profile_preference
         name = str(data.get("profile", ""))

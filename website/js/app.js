@@ -164,6 +164,18 @@
             addFeedback('Sparring profile: ' + (msg.profile || '') + '.');
             toast('Sparring profile: ' + (msg.profile || '').replace(/_/g, ' '), '🤖');
         }
+        if (msg.type === 'calibration_ack') {
+            const st = document.getElementById('calStatus');
+            if (st) st.style.display = msg.status === 'started' ? 'flex' : 'none';
+            toast(msg.message || 'Calibration ' + msg.status, '🎯');
+        }
+        if (msg.type === 'calibration_done') {
+            const st = document.getElementById('calStatus');
+            if (st) st.style.display = 'none';
+            const t = (msg.thresholds || {});
+            toast('Calibrated! min confidence ' + Math.round((t.min_conf || 0.6) * 100) +
+                '%, min speed ' + t.min_speed, '🎯');
+        }
         if (msg.type === 'match_summary') {
             showMatchSummary(msg);
         }
@@ -711,8 +723,11 @@
         }
         toast('Match summary ready — great session!', '🏆');
         g('sumMost').textContent = 'Most used: ' + ((s.most_used || 'none').replace(/_/g, ' '));
-        g('sumReaction').textContent = 'Reaction: ' + (s.reaction_s || 0).toFixed(2) + 's';
-        g('sumFatigue').textContent = 'Final fatigue: ' + (s.final_fatigue || 0);
+        g('sumReaction').textContent = s.reaction_s != null
+            ? 'Reaction: ' + Number(s.reaction_s).toFixed(2) + 's'
+            : 'Reaction: — (not enough data)';
+        g('sumFatigue').textContent = s.final_fatigue != null
+            ? 'Final fatigue: ' + s.final_fatigue : 'Final fatigue: —';
         g('sumTime').textContent = 'Duration: ' + fmtClock(s.duration_s);
         const ul = g('sumSuggestions');
         ul.innerHTML = '';
@@ -803,6 +818,18 @@
             ws.send(JSON.stringify({ type: 'reset' }));
         }
     });
+
+    // Strike calibration: throw 5 clean punches to personalise the detector.
+    els.calBtn = els.calBtn || document.getElementById('calBtn');
+    if (els.calBtn) {
+        els.calBtn.addEventListener('click', () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'calibration', action: 'start' }));
+            } else {
+                toast('Connect to the server first', '⚠️');
+            }
+        });
+    }
 
     // ---- View toggles: skeleton / ghost / mirror ----------------------------
     function bindToggle(id, get, set, onLabel, offLabel) {

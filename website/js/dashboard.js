@@ -196,8 +196,23 @@
         timeline: document.getElementById('videoTimeline'),
         scrub: document.getElementById('videoScrub'),
         scrubInfo: document.getElementById('videoScrubInfo'),
+        preview: document.getElementById('videoPreview'),
     };
     let videoData = null;
+    let videoUrl = null;
+
+    function showStrikeAt(t) {
+        if (!videoData) return;
+        const near = (videoData.timeline || []).filter((e) => Math.abs(e.t - t) < 0.8);
+        const label = near.length
+            ? near.map((e) => (e.type || '').replace(/_/g, ' ') + ' (' +
+                Math.round((e.confidence || 0) * 100) + '% conf)').join(', ')
+            : 'no confident strike at this moment';
+        ve.scrubInfo.textContent = Math.round(t) + 's — ' + label;
+        if (ve.preview && ve.preview.duration && !isNaN(ve.preview.duration)) {
+            try { ve.preview.currentTime = t; } catch (_) { /* seeking error */ }
+        }
+    }
 
     async function uploadVideo(file) {
         if (!file) return;
@@ -207,6 +222,9 @@
         ve.status.textContent = 'Uploading…';
         ve.fill.style.width = '0%';
         ve.pct.textContent = '0%';
+        if (videoUrl) { try { URL.revokeObjectURL(videoUrl); } catch (_) {} }
+        videoUrl = URL.createObjectURL(file);
+        if (ve.preview) { ve.preview.src = videoUrl; ve.preview.load(); }
         const fd = new FormData();
         fd.append('file', file);
         let jobId;
@@ -239,18 +257,37 @@
         ve.strikes.textContent = s.total_strikes || 0;
         ve.accuracy.textContent = (s.accuracy_pct || 0) + '%';
         ve.perf.textContent = s.performance || 0;
-        ve.fatigue.textContent = s.final_fatigue || 0;
+        ve.fatigue.textContent = s.final_fatigue != null ? s.final_fatigue : '—';
         ve.most.textContent = 'Most used: ' + ((s.most_used || 'none').replace(/_/g, ' '));
-        ve.reaction.textContent = 'Reaction: ' + (s.reaction_s || 0).toFixed(2) + 's';
+        ve.reaction.textContent = s.reaction_s != null
+            ? 'Reaction: ' + Number(s.reaction_s).toFixed(2) + 's' : 'Reaction: — (not enough data)';
         ve.suggestions.textContent = (s.suggestions || []).join(' · ');
         videoData = result;
         ve.result.hidden = false;
-        ve.status.textContent = 'Done — ' + ((result.timeline || []).length) + ' strikes detected.';
+        ve.status.textContent = 'Done — ' + ((result.timeline || []).length) +
+            ' confident strikes detected.';
         drawVideoTimeline();
         const dur = Math.max(1, result.duration_s || 1);
         ve.scrub.max = 100;
         ve.scrub.value = 0;
         ve.scrubInfo.textContent = 'Drag to scrub — 0s';
+        // Click the timeline canvas to jump to that moment.
+        if (!ve.timeline.dataset.wired) {
+            ve.timeline.dataset.wired = '1';
+            ve.timeline.addEventListener('click', (ev) => {
+                const rect = ve.timeline.getBoundingClientRect();
+                const frac = (ev.clientX - rect.left) / rect.width;
+                showStrikeAt(frac * dur);
+            });
+        }
+        if (ve.preview) {
+            ve.preview.onloadedmetadata = () => { try { ve.preview.currentTime = 0; } catch (_) {} };
+            ve.preview.ontimeupdate = () => {
+                if (!ve.preview.duration) return;
+                ve.scrub.value = (ve.preview.currentTime / ve.preview.duration) * 100;
+                showStrikeAt(ve.preview.currentTime);
+            };
+        }
     }
 
     function drawVideoTimeline() {
@@ -279,12 +316,7 @@
         if (!videoData) return;
         const dur = Math.max(1, videoData.duration_s || 1);
         const t = (ve.scrub.value / 100) * dur;
-        const near = (videoData.timeline || []).filter((e) => Math.abs(e.t - t) < 0.8);
-        const label = near.length
-            ? near.map((e) => (e.type || '').replace(/_/g, ' ') + ' (' +
-                Math.round((e.confidence || 0) * 100) + '%)').join(', ')
-            : 'no strike at this moment';
-        ve.scrubInfo.textContent = Math.round(t) + 's — ' + label;
+        showStrikeAt(t);            // updates label AND seeks the video preview
     }
 
     document.addEventListener('DOMContentLoaded', () => {

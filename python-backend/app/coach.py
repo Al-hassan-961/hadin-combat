@@ -191,8 +191,15 @@ class _TorsoState:
 class MovementAnalyzer:
     """Detects martial-arts techniques from a rolling window of poses."""
 
-    def __init__(self, window: int = 12) -> None:
+    def __init__(self, window: int = 12,
+                 min_arm_dist: float = 0.10,
+                 min_leg_dist: float = 0.15) -> None:
         self.window = window
+        # Minimum limb travel across the window before a strike is even
+        # considered. Keeps joint jitter / tiny motions from registering as
+        # strikes (an actual punch crosses far more than 10% of frame height).
+        self.min_arm_dist = min_arm_dist
+        self.min_leg_dist = min_leg_dist
         self._buffer: Deque[List[Dict[str, float]]] = deque(maxlen=window)
 
     def push(self, kps: Sequence[Dict[str, float]]) -> None:
@@ -259,7 +266,7 @@ class MovementAnalyzer:
             dist = _speed(first, last)
             conf = min(0.9, 0.5 + dist * 2.0)
 
-            if dist < 0.05:
+            if dist < self.min_arm_dist:
                 # No strike: check guard (wrist held high near the face).
                 shoulder = _pt(frames[-1], sh)
                 if shoulder and last[1] < shoulder[1] - 0.08:
@@ -293,7 +300,7 @@ class MovementAnalyzer:
             dx = last[0] - first[0]
             dy = last[1] - first[1]
             dist = _speed(first, last)
-            if dist < 0.07:
+            if dist < self.min_leg_dist:
                 continue
             conf = min(0.9, 0.45 + dist * 1.5)
             if dy <= -0.06 and abs(dx) < abs(dy) * 2:

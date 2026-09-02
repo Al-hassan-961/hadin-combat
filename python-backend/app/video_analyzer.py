@@ -5,12 +5,17 @@
 #
 # Offline video sparring analysis.
 #
-# Reuses the SAME per-frame pipeline as live sessions (movement detection,
+# Reuses the same per-frame pipeline as live sessions (movement detection,
 # coaching stats and fatigue analytics) on a recorded video:
 #   * analyse a video frame-by-frame with the active pose backend
-#   * timeline of every detected technique with timestamps + confidence
+#   * timeline of every CONFIDENT technique with timestamps + confidence
 #   * fatigue progression curve + full match summary
-#   * background jobs with progress % so the UI can show a progress bar.
+#   * background jobs with progress % for the UI progress bar.
+#
+# Strike counting is gated (see app/strike_detector.py): only detections with
+# confidence >= 60% pass the cooldown + dedupe gate, so one punch is counted
+# once, not once per analysed frame. Reaction time is measured as the gap
+# between movement onset (speed first rising) and the accepted strike.
 #
 # The pipeline is split so it can be tested on synthetic frame iterators
 # without real video files (analyze_frames_iter); analyze_video_file wraps
@@ -22,16 +27,19 @@ import os
 import threading
 import time
 import uuid
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence
 
 from .analytics import FatigueTracker, build_session_summary
 from .coach import (L_ANKLE, L_WRIST, R_ANKLE, R_WRIST, CoachEngine,
-                    MovementAnalyzer, STRIKE_TYPES)
+                    MovementAnalyzer)
+from .strike_detector import StrikeGate, UNCERTAIN_LO, confidence_state
 
 PoseFn = Callable[[Any], Optional[List[Dict[str, float]]]]
 
 FATIGUE_SAMPLE_S = 0.5     # seconds between fatigue-curve samples
 TARGET_FPS = 10            # analyse at ~10 fps regardless of source fps
+ONSET_SPEED = 0.30         # speed (norm units / s) that marks a movement onset
+UNCERTAIN_WINDOW = 0.5     # how long an 'uncertain' note stays visible
 
 
 def _norm(kps_px: List[Dict[str, float]], w: int, h: int):
@@ -62,26 +70,38 @@ def speed_band(speed_per_s: float) -> str:
 
 
 class FramePipeline:
-    """Reusable per-frame analysis pipeline (shared by live + video paths)."""
+    """Reusable per-frame analysis pipeline (shared by live + video paths).
 
-    def __init__(self) -> None:
+    Counts strikes through a StrikeGate so sensitivity/noise never inflates
+    totals, and measures per-strike reaction time (onset -> accepted strike).
+    """
+
+    def __init__(self, calibration: Optional[Dict[str, float]] = None) -> None:
         self.movement = MovementAnalyzer()
         self.coach = CoachEngine()
         self.fatigue = FatigueTracker()
+        self.gate = StrikeGate()
+        if calibration:
+            self.gate.configure(min_conf=calibration.get("min_conf"),
+                                cooldown=calibration.get("cooldown"),
+                                min_speed=calibration.get("min_speed"))
         self._prev_pose: Optional[List[Dict[str, float]]] = None
-        self._prev_total = 0
         self.speed_per_s = 0.0
         self.speed_band = "slow"
         self.fatigue_curve: List[List[float]] = []      # [t_s, score]
-        self.timeline: List[Dict[str, Any]] = []        # per detected technique
-        self.landed = 0
+        self.timeline: List[Dict[str, Any]] = []        # accepted techniques
+        self.uncertain: int = 0                         # suppressed <60% conf
+        self.reaction_samples: List[float] = []         # onset->strike gaps
         self._t_last_fatigue = -1.0
+        self._onset: Optional[float] = None
+        self._last_accepted = -1.0
 
+    # ------------------------------------------------------------- per frame --
     def step(self, kps_px: Optional[List[Dict[str, float]]],
              w: int, h: int, t_s: float, sample_fps: float = TARGET_FPS) -> None:
         norm = _norm(kps_px, w, h) if kps_px else None
 
-        # Movement speed from wrist/ankle displacement (per second).
+        # Instantaneous speed from wrist/ankle displacement.
         if norm and self._prev_pose:
             disp = _mean_joint_disp(self._prev_pose, norm,
                                     (L_WRIST, R_WRIST, L_ANKLE, R_ANKLE))
@@ -89,65 +109,103 @@ class FramePipeline:
             self.speed_band = speed_band(self.speed_per_s)
         if norm:
             self._prev_pose = norm
-
-        if norm:
-            self.movement.push(norm)
             self.fatigue.observe_stance(norm)
+            self.movement.push(norm)
+
+        # Track movement onset for reaction measurement.
+        if self.speed_per_s >= ONSET_SPEED and self._onset is None \
+                and (t_s - self._last_accepted) > 0.5:
+            self._onset = t_s
+        elif self.speed_per_s < ONSET_SPEED * 0.5 and self._onset is not None:
+            # Movement ended without a strike - forget the stale onset.
+            if (t_s - self._onset) > 0.9:
+                self._onset = None
 
         detections = self.movement.analyze()
-        coach = self.coach.update(detections)
+        candidate = self.gate.pick(detections)
 
-        # Feed each NEW strike to fatigue + timeline + landed counter.
-        total = coach.get("total_strikes", 0)
-        if total > self._prev_total:
-            latest = coach.get("last")
-            if latest:
-                snap = (latest.get("confidence", 0.5) * 0.5 +
-                        (latest.get("quality", 50) / 100.0) * 0.5)
-                for _ in range(total - self._prev_total):
-                    self.fatigue.observe_strike(snap, t_s)
-                if latest.get("quality", 0) >= 70 or latest.get("confidence", 0) >= 0.6:
-                    self.landed += 1
-                self.timeline.append({
-                    "t": round(t_s, 2),
-                    "type": latest.get("type"),
-                    "side": latest.get("side"),
-                    "quality": latest.get("quality"),
-                    "confidence": latest.get("confidence"),
-                })
-            self._prev_total = total
+        if candidate is not None and self.gate.accept(t_s, candidate, self.speed_per_s):
+            # Reaction = onset -> accepted strike.
+            if self._onset is not None and t_s > self._onset:
+                self.reaction_samples.append(
+                    min(1.5, max(0.05, round(t_s - self._onset, 2))))
+            else:
+                self.reaction_samples.append(-1.0)      # sentinel: not measured
+            self._onset = None
+            self._last_accepted = t_s
 
-        # Fatigue curve sample.
+            self.coach.update([candidate], now=t_s)
+            # Fatigue "snap" from the ACTUAL measured speed.
+            snap = min(1.0, self.speed_per_s / 2.0) if self.speed_per_s > 0.2 \
+                else (float(candidate.get("confidence", 0.5)) * 0.5 +
+                      (float(candidate.get("quality", 50)) / 100.0) * 0.5)
+            self.fatigue.observe_strike(snap, t_s)
+            self.timeline.append({
+                "t": round(t_s, 2),
+                "type": candidate.get("type"),
+                "side": candidate.get("side"),
+                "quality": candidate.get("quality"),
+                "confidence": candidate.get("confidence"),
+                "state": confidence_state(float(candidate.get("confidence", 0))),
+            })
+        else:
+            # Count suppressed near-misses for the debug report.
+            if candidate is not None or (detections and
+                    any(UNCERTAIN_LO <= float(d.get("confidence", 0)) < 0.6
+                        for d in detections if d.get("type"))):
+                # Only when a plausible strike-type moved but was rejected.
+                for d in detections:
+                    if d.get("type") and d.get("type") not in ("guard", "stance"):
+                        conf = float(d.get("confidence", 0))
+                        if UNCERTAIN_LO <= conf < 0.6:
+                            self.uncertain += 1
+                            break
+
+        # Fatigue progression curve.
         if t_s - self._t_last_fatigue >= FATIGUE_SAMPLE_S:
             self._t_last_fatigue = t_s
             self.fatigue_curve.append([round(t_s, 2), self.fatigue.score()["score"]])
 
-    def summary(self, counts: Dict[str, int], duration_s: float,
-                tempo: float, reaction_s: float) -> Dict[str, Any]:
+    # --------------------------------------------------------------- summary --
+    def summary(self, counts: Dict[str, int], duration_s: float) -> Dict[str, Any]:
         m = self.coach.metrics()
-        final_fatigue = self.fatigue.score()["score"] if self.fatigue_curve else 0
+        measured = [r for r in self.reaction_samples if r and r > 0]
+        reaction = (sum(measured) / len(measured)) if measured else None
+        final_fatigue = self.fatigue.score()["score"] if self.fatigue_curve else None
+        # "Landed" = clean technique (quality >= 70 OR confidence >= 0.8).
+        landed = sum(1 for e in self.timeline
+                     if (e.get("quality", 0) or 0) >= 70
+                     or (e.get("confidence", 0) or 0) >= 0.8)
         return build_session_summary(
             total_strikes=m["total_strikes"],
-            landed=self.landed,
+            landed=landed,
             counts=counts,
             avg_quality=m.get("avg_quality", 0),
-            tempo=tempo or m.get("tempo_per_s", 0),
-            reaction_s=reaction_s or m.get("reaction_s", 0),
+            tempo=m.get("tempo_per_s", 0),
+            reaction_s=reaction,
             final_fatigue=final_fatigue,
             duration_s=duration_s,
             fatigue_curve=self.fatigue_curve,
         )
 
+    def debug_report(self) -> Dict[str, Any]:
+        return {
+            "uncertain_suppressed": self.uncertain,
+            "reaction_samples": len(self.reaction_samples),
+            "timeline_entries": len(self.timeline),
+        }
+
 
 def analyze_frames_iter(pose_fn: PoseFn, frames: Iterator[Any],
                         fps: float, duration_hint: Optional[float] = None,
                         progress_cb: Optional[Callable[[float], None]] = None,
-                        total_hint: Optional[int] = None) -> Dict[str, Any]:
+                        total_hint: Optional[int] = None,
+                        calibration: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
     """Analyse an iterator of frames (BGR numpy arrays) with a pose function.
 
     `progress_cb(0..100)` is called periodically for the UI progress bar.
     """
-    pipe = FramePipeline()
+    pipe = FramePipeline(calibration=calibration)
     stride = max(1, int(round(fps / TARGET_FPS)))
     t = 0.0
     step_s = 1.0 / TARGET_FPS
@@ -175,8 +233,6 @@ def analyze_frames_iter(pose_fn: PoseFn, frames: Iterator[Any],
 
     counts = pipe.coach.counts
     duration = duration_hint or t
-    summary = pipe.summary(counts, duration, pipe.coach.metrics()["tempo_per_s"],
-                           pipe.coach.metrics()["reaction_s"])
     return {
         "source": "video",
         "fps": fps,
@@ -185,14 +241,14 @@ def analyze_frames_iter(pose_fn: PoseFn, frames: Iterator[Any],
         "timeline": pipe.timeline,
         "fatigue_curve": pipe.fatigue_curve,
         "techniques": dict(counts),
-        "summary": summary,
+        "debug": pipe.debug_report(),
+        "summary": pipe.summary(counts, duration),
     }
 
 
 def analyze_video_file(pose_fn: PoseFn, path: str,
                        progress_cb: Optional[Callable[[float], None]] = None,
-                       on_frame: Optional[Callable[[int, int], None]] = None
-                       ) -> Dict[str, Any]:
+                       calibration: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
     """Analyse a video file (MP4/MOV/AVI) frame by frame via OpenCV."""
     import cv2
 
@@ -213,7 +269,8 @@ def analyze_video_file(pose_fn: PoseFn, path: str,
         return analyze_frames_iter(pose_fn, frames(), fps,
                                    duration_hint=total / fps if total else None,
                                    progress_cb=progress_cb,
-                                   total_hint=total or None)
+                                   total_hint=total or None,
+                                   calibration=calibration)
     finally:
         cap.release()
 
@@ -226,13 +283,15 @@ class VideoJobManager:
         self._jobs: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
 
-    def submit(self, video_path: str) -> str:
+    def submit(self, video_path: str,
+               calibration: Optional[Dict[str, float]] = None) -> str:
         job_id = uuid.uuid4().hex[:12]
         with self._lock:
             self._jobs[job_id] = {
                 "status": "queued", "progress": 0.0, "error": None, "result": None}
         thread = threading.Thread(target=self._worker,
-                                  args=(job_id, video_path), daemon=True)
+                                  args=(job_id, video_path, calibration),
+                                  daemon=True)
         thread.start()
         return job_id
 
@@ -249,7 +308,8 @@ class VideoJobManager:
                 for k in list(self._jobs)[:-keep]:
                     self._jobs.pop(k, None)
 
-    def _worker(self, job_id: str, video_path: str) -> None:
+    def _worker(self, job_id: str, video_path: str,
+                calibration: Optional[Dict[str, float]]) -> None:
         def progress(p: float) -> None:
             with self._lock:
                 job = self._jobs.get(job_id)
@@ -260,7 +320,9 @@ class VideoJobManager:
             with self._lock:
                 if job_id in self._jobs:
                     self._jobs[job_id]["status"] = "processing"
-            result = analyze_video_file(self._pose_fn, video_path, progress_cb=progress)
+            result = analyze_video_file(self._pose_fn, video_path,
+                                        progress_cb=progress,
+                                        calibration=calibration)
             with self._lock:
                 job = self._jobs.get(job_id)
                 if job:

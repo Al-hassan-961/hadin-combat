@@ -122,12 +122,15 @@ class FatigueTracker:
             stab_component = max(
                 0.0, min(100.0, (recent / max(self._wobble_baseline, 1e-6) - 1) * 120))
 
-        # Stance-WIDTH stability: erratic width (growing variance) = fatigue.
+        # Stance-WIDTH: erratic OR WIDENING stance (feet spreading when tired)
+        # both push the component up.
         width_component = 0.0
         if self._width_baseline is not None and len(self._widths) >= 6:
             widths = list(self._widths)
-            recent_var = sum((x - self._width_baseline) ** 2 for x in widths) / len(widths)
-            width_component = max(0.0, min(100.0, recent_var * 160))
+            recent = sum(widths) / len(widths)
+            var = sum((x - self._width_baseline) ** 2 for x in widths) / len(widths)
+            widen = max(0.0, (recent / max(self._width_baseline, 1e-6) - 1) * 100)
+            width_component = max(0.0, min(100.0, var * 80 + widen * 0.6))
 
         return {"snap": snap_component, "reaction": react_component,
                 "stability": stab_component, "width": width_component}
@@ -211,7 +214,7 @@ def performance_score(accuracy: float, avg_quality: float,
     """0-100 overall performance from accuracy, quality, tempo and fatigue."""
     acc = max(0.0, min(1.0, accuracy)) * 100
     score = (0.45 * acc + 0.25 * avg_quality + 0.15 * min(100, tempo * 40)
-             + 0.15 * (100 - max(0, min(100, final_fatigue))))
+             + 0.15 * (100 - max(0, min(100, final_fatigue or 0))))
     return int(max(0, min(100, round(score))))
 
 
@@ -233,7 +236,7 @@ def improvement_suggestions(most_used: Optional[str], accuracy: float,
     if most_used:
         tips.append(f"Your most-used strike is {most_used.replace('_', ' ')} — "
                     f"drill it into faster, sharper reps.")
-    if reaction_s >= 1.0:
+    if reaction_s is not None and reaction_s >= 1.0:
         tips.append("Reactions are slow — drill simple jab-cross responses to "
                     "sharpen your timing.")
     if final_fatigue >= 60:
@@ -262,10 +265,10 @@ def build_session_summary(total_strikes: int = 0, landed: int = 0,
         "accuracy_pct": round(accuracy * 100),
         "most_used": most or "none",
         "avg_quality": round(avg_quality),
-        "reaction_s": round(reaction_s, 2),
+        "reaction_s": round(reaction_s, 2) if reaction_s is not None else None,
         "tempo_per_s": round(tempo, 2),
         "performance": performance_score(accuracy, avg_quality, tempo, final_fatigue),
-        "final_fatigue": int(final_fatigue),
+        "final_fatigue": int(final_fatigue) if final_fatigue is not None else None,
         "duration_s": round(duration_s),
         "fatigue_curve": [list(p) for p in (fatigue_curve or [])],
         "suggestions": improvement_suggestions(

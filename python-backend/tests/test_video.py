@@ -56,13 +56,44 @@ def test_analyze_frames_iter_detects_strike_and_builds_summary():
     result = analyze_frames_iter(pose_fn, frames, fps=10, duration_hint=6.0)
 
     assert result["source"] == "video"
-    assert result["summary"]["total_strikes"] >= 1
-    assert result["techniques"].get("jab", 0) >= 1
+    # Gating: a handful of CONFIDENT strikes — never one-per-frame inflation.
+    total = result["summary"]["total_strikes"]
+    assert total >= 1
+    assert total <= 15                       # 6s @ cooldown 0.35s ≈ max 17
+    assert result["techniques"], "expected at least one technique counted"
     assert result["timeline"], "expected at least one timeline entry"
-    assert any(e["type"] == "jab" for e in result["timeline"])
+    for e in result["timeline"]:
+        assert (e.get("confidence") or 0) >= 0.6   # only confident strikes shown
     assert result["timeline"][0]["t"] >= 0
-    assert "confidence" in result["timeline"][0]
     assert result["fatigue_curve"], "expected fatigue progression samples"
+
+
+def test_strike_gate_cooldown_and_dedupe():
+    from app.strike_detector import StrikeGate
+    gate = StrikeGate(min_conf=0.6)
+    d1 = {"type": "jab", "confidence": 0.8, "quality": 70}
+    d2 = {"type": "cross", "confidence": 0.8, "quality": 70}
+    assert gate.accept(0.0, d1, None) is True
+    assert gate.accept(0.1, d1, None) is False       # cooldown
+    assert gate.accept(0.5, d2, None) is True        # new type after cooldown
+
+
+def test_strike_gate_low_confidence_rejected():
+    from app.strike_detector import StrikeGate
+    gate = StrikeGate(min_conf=0.6)
+    low = {"type": "hook", "confidence": 0.4, "quality": 60}
+    assert gate.pick([low]) is None                  # below 60% -> not a strike
+    assert gate.accept(0.0, low, None) is False
+
+
+def test_calibrate_thresholds_requires_data():
+    from app.strike_detector import calibrate_thresholds
+    import pytest
+    with pytest.raises(ValueError):
+        calibrate_thresholds([], [])
+    th = calibrate_thresholds([1.0, 1.2, 0.9, 1.1, 1.0], [0.8, 0.85, 0.9, 0.8, 0.9])
+    assert 0.25 <= th["min_speed"] <= 1.0
+    assert th["min_conf"] >= 0.6
 
 
 def test_speed_band_thresholds():
