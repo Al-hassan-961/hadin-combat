@@ -408,3 +408,15 @@ body {
     border-radius: 8px;
     font-size: 0.8rem;
 }
+
+/* Dashboard mini stats row (strikes/min + reaction) */
+.mini-row { display: flex; gap: 10px; margin-bottom: 10px; }
+.mini-box {
+    flex: 1;
+    background: var(--bg-2);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    padding: 10px;
+    text-align: center;
+}
+.mini-box .card-num { font-size: 1.2rem; }

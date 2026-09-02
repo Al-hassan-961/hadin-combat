@@ -49,6 +49,28 @@
             <canvas id="chartProfiles" width="340" height="160"></canvas>
         </section>
 
+        <!-- Strike accuracy trend (avg technique quality per session) -->
+        <section class="panel">
+            <h2>🎯 Strike accuracy</h2>
+            <canvas id="chartAccuracy" width="340" height="180"></canvas>
+        </section>
+
+        <!-- Movement efficiency + reaction time trend -->
+        <section class="panel">
+            <h2>⚡ Efficiency &amp; reaction</h2>
+            <div class="mini-row">
+                <div class="mini-box">
+                    <div class="card-num" id="statSpm">0</div>
+                    <div class="card-label">Avg strikes/min</div>
+                </div>
+                <div class="mini-box">
+                    <div class="card-num" id="statReaction">0.0s</div>
+                    <div class="card-label">Avg reaction</div>
+                </div>
+            </div>
+            <canvas id="chartEffReaction" width="340" height="160"></canvas>
+        </section>
+
         <!-- Improvement suggestions -->
         <section class="panel">
             <h2>💡 Personalised improvement</h2>

@@ -402,6 +402,22 @@ class CoachEngine:
         self._strike_times: Deque[float] = deque(maxlen=8)
         self._advice_idx: Dict[str, int] = {}
         self._last_tempo = 0.0
+        # Session aggregates for the performance dashboard.
+        self._qualities: List[float] = []
+        self._intervals: List[float] = []
+
+    def metrics(self) -> Dict[str, Any]:
+        """Whole-session aggregate metrics for the performance dashboard."""
+        avg_quality = (sum(self._qualities) / len(self._qualities)) \
+            if self._qualities else 0.0
+        reaction = (sum(self._intervals) / len(self._intervals)) \
+            if self._intervals else 0.0
+        return {
+            "avg_quality": round(avg_quality),
+            "reaction_s": round(reaction, 2),
+            "tempo_per_s": round(self._last_tempo, 1),
+            "total_strikes": self.total_strikes,
+        }
 
     def update(self, detections: List[Dict[str, Any]],
                now: Optional[float] = None) -> Dict[str, Any]:
@@ -422,6 +438,12 @@ class CoachEngine:
 
         if latest_strike:
             self.last = latest_strike
+            self._qualities.append(float(latest_strike.get("quality", 0)))
+            if len(self._strike_times) >= 2:
+                prev = self._strike_times[-2]
+                gap = now - prev
+                if gap <= 4.0:
+                    self._intervals.append(gap)
             idx = self._advice_idx.get(latest_strike["type"], 0)
             pool = ADVICE.get(latest_strike["type"], [])
             if pool:
@@ -465,4 +487,6 @@ class CoachEngine:
         self.total_strikes = 0
         self._strike_times.clear()
         self._advice_idx.clear()
+        self._qualities.clear()
+        self._intervals.clear()
         self._last_tempo = 0.0

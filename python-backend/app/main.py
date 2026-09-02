@@ -320,15 +320,24 @@ def _record_history(client_id: str, sess: Optional[Dict[str, Any]]) -> None:
         fatigue_score = fatigue.score()["score"] if fatigue else 0
     except Exception:  # noqa: BLE001
         fatigue_score = 0
+    duration = max(0.0, time.time() - sess.get("started", time.time()))
+    try:
+        m = coach.metrics() if coach else {}
+    except Exception:  # noqa: BLE001
+        m = {}
+    total = sess.get("_strikes_seen", 0)
     summary = {
         "client_id": client_id,
         "ended": round(time.time(), 1),
-        "duration_s": round(max(0.0, time.time() - sess.get("started", time.time()))),
+        "duration_s": round(duration),
         "frames": sess.get("frames", 0),
         "profile": sess.get("profile", "balanced"),
         "techniques": counts,
-        "total_strikes": sess.get("_strikes_seen", 0),
+        "total_strikes": total,
         "fatigue": fatigue_score,
+        "avg_quality": m.get("avg_quality", 0),
+        "reaction_s": m.get("reaction_s", 0.0),
+        "strikes_per_min": round((total / duration) * 60) if duration else 0,
     }
     HISTORY.append(summary)
     del HISTORY[:-MAX_HISTORY]

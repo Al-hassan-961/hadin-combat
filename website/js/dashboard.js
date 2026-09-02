@@ -30,6 +30,10 @@
         tech: document.getElementById('chartTechniques'),
         fat: document.getElementById('chartFatigue'),
         prof: document.getElementById('chartProfiles'),
+        acc: document.getElementById('chartAccuracy'),
+        eff: document.getElementById('chartEffReaction'),
+        spm: document.getElementById('statSpm'),
+        reaction: document.getElementById('statReaction'),
         improv: document.getElementById('improvementList'),
         sessionsList: document.getElementById('sessionList'),
     };
@@ -59,6 +63,34 @@
             ctx.fillStyle = '#8a8aa3';
             ctx.fillText(lab, x, H - 7);
         });
+    }
+
+    // Two time-series polylines (e.g. strikes/min and reaction time).
+    function lineChart(canvas, series, colorA, colorB) {
+        if (!canvas || !canvas.getContext) return;
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width, H = canvas.height;
+        ctx.clearRect(0, 0, W, H);
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        const n = series.a.length;
+        if (!n) return;
+        const max = Math.max(1, ...series.a, ...series.b);
+        const left = 30, right = W - 8, top = 8, bottom = H - 12;
+        const x = (i) => n === 1 ? (left + right) / 2 : left + (i / (n - 1)) * (right - left);
+        const y = (v) => bottom - (v / max) * (bottom - top);
+        [[series.a, colorA], [series.b, colorB]].forEach(([vals, col]) => {
+            ctx.strokeStyle = col;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            vals.forEach((v, i) => { const px = x(i), py = y(v); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+            ctx.stroke();
+        });
+        ctx.fillStyle = '#8a8aa3';
+        // index labels every session
+        if (n <= 12) {
+            for (let i = 0; i < n; i++) ctx.fillText(String(i + 1), x(i), H - 2);
+        }
     }
 
     async function refresh() {
@@ -98,6 +130,20 @@
         const pk = Object.keys(profileCounts);
         barChart(els.prof, pk.map((k) => (PROFILE_PRETTY[k] || k).slice(0, 6)),
             pk.map((k) => profileCounts[k]), '#ffd166');
+
+        // ---- Accuracy + efficiency / reaction (new, additive) -------------------
+        barChart(els.acc, history.map((_, i) => 'S' + (i + 1)),
+            history.map((h) => h.avg_quality || 0), '#00ffc8');
+        lineChart(els.eff,
+            { a: history.map((h) => h.strikes_per_min || 0),
+              b: history.map((h) => (h.reaction_s || 0) * 100) },  // *100 to share scale
+            '#ffd166', '#ff285c');
+        let spmSum = 0, reactSum = 0, nSess = 0;
+        history.forEach((h) => { spmSum += h.strikes_per_min || 0;
+            reactSum += h.reaction_s || 0; nSess++; });
+        if (els.spm) els.spm.textContent = nSess ? Math.round(spmSum / nSess) : 0;
+        if (els.reaction) els.reaction.textContent = nSess
+            ? (reactSum / nSess).toFixed(2) + 's' : '0.0s';
 
         // ---- Improvement --------------------------------------------------------
         const tips = (data.improvement && data.improvement.length)

@@ -150,3 +150,20 @@ def test_build_opponent_shapes_guard():
 
 def test_opponent_empty_when_no_pose():
     assert build_opponent([], "aggressive", 0.5) == []
+
+
+def test_coach_metrics_aggregates():
+    from app.coach import CoachEngine
+    from app.coach import MovementAnalyzer as _M  # noqa: F401
+    base = make_pose()
+    jab = [_phase([{9: (0.62, 0.62)}], steps=5)]
+    coach = CoachEngine()
+    a = MovementAnalyzer(window=14)
+    for pose in jab[0]:
+        a.push(pose)
+        coach.update(a.analyze())
+    m = coach.metrics()
+    assert m["total_strikes"] >= 1
+    assert 0 <= m["avg_quality"] <= 100
+    assert m["reaction_s"] >= 0
+    assert m["tempo_per_s"] >= 0
