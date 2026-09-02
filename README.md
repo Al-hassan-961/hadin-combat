@@ -57,10 +57,11 @@ flowchart LR
 
 - 🧬 **Fighting DNA Extraction** — your movement style is encoded into a reusable latent fingerprint.
 - 🥊 **Adaptive Opponent** — the AI opponent adapts stance, tempo, and defense to counter you.
+- 🧠 **AI Coach** — real-time martial-arts movement detection (jab, cross, hook, uppercut, front/roundhouse kicks, guard, stance) with technique counters, quality scoring, tempo and rotating professional coaching advice (`app/coach.py`).
 - 🔄 **Co-Evolution** — both you and the AI improve session over session.
 - 📱 **Mobile-First** — thumb-friendly neon UI, works on any browser.
 - 🚀 **One-Command Setup** on Android (Termux) — no manual steps.
-- 📡 **Real-Time WebSockets** — sub-100ms latency for pose → opponent → feedback.
+- 📡 **Real-Time WebSockets** — sub-100ms latency for pose → movement → coach → opponent → feedback.
 - 🧯 **Graceful Degradation** — if C++ compilation fails, the backend falls
   back to MediaPipe and then an OpenCV motion fallback. Opponent, style and
   co-evolution are pure Python (`app/engine.py`), so **the app is fully

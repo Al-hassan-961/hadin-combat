@@ -230,6 +230,10 @@
         if (msg.feedback) {
             updateFeedback(msg.feedback);
         }
+        if (msg.coach) {
+            updateCoachMove(msg.coach);
+            updateCoachCounts(msg.coach);
+        }
     }
 
     function drawSkeleton(kps, w, h) {
@@ -281,7 +285,52 @@
         ctx.restore();
     }
 
-    // ---- Feedback UI ---------------------------------------------------------
+    // ---- Feedback / coach UI -------------------------------------------------
+    const MOVE_LABELS = {
+        jab: '👊 Jab', cross: '👊 Cross', hook: '🥊 Hook', uppercut: '🥊 Uppercut',
+        front_kick: '🦵 Front Kick', roundhouse_kick: '🦵 Roundhouse Kick',
+        knee_raise: '🦵 Knee Raise', block: '🛡️ Block', guard: '🧤 Guard',
+        stance: '🧍 Stance',
+    };
+
+    function updateCoachMove(coach) {
+        const last = coach && coach.last;
+        els.moveName = els.moveName || document.getElementById('moveName');
+        els.moveSide = els.moveSide || document.getElementById('moveSide');
+        els.moveQ = els.moveQ || document.getElementById('moveQ');
+        els.qualityFill = els.qualityFill || document.getElementById('qualityFill');
+
+        if (last && MOVE_LABELS[last.type]) {
+            els.moveName.textContent = MOVE_LABELS[last.type];
+            els.moveSide.textContent = last.side === 'left' ? 'L' : last.side === 'right' ? 'R' : '';
+            els.moveQ.textContent = (last.quality || 0) + '%';
+            const fill = els.qualityFill;
+            fill.style.width = (last.quality || 0) + '%';
+            fill.style.background = (last.quality || 0) >= 85 ? 'var(--neon)'
+                : (last.quality || 0) >= 60 ? '#ffd166' : 'var(--accent)';
+        } else {
+            els.moveName.textContent = '—';
+            els.moveSide.textContent = '';
+            els.moveQ.textContent = '';
+        }
+    }
+
+    function updateCoachCounts(coach) {
+        els.coachCounts = els.coachCounts || document.getElementById('coachCounts');
+        if (!coach || !coach.counts) return;
+        const chips = Object.entries(coach.counts)
+            .filter(([, c]) => c > 0)
+            .slice(0, 8)
+            .map(([t, c]) => {
+                const label = (MOVE_LABELS[t] || t).replace(/^[^ ]+ /, '');
+                return '<span class="chip">' + label + ' <b>' + c + '</b></span>';
+            })
+            .join('');
+        els.coachCounts.innerHTML = chips
+            ? chips
+            : '<span class="chip chip-dim">no techniques yet</span>';
+    }
+
     function updateFeedback(fb) {
         els.grade.textContent = fb.grade || 'C';
         els.grade.className = 'grade ' + (fb.grade || 'c').toLowerCase();

@@ -52,12 +52,31 @@ Example:
     "score": 82,
     "notes": ["Center your shoulders over your hips for better balance."]
   },
+  "movements": [
+    { "type": "jab", "side": "left", "quality": 81, "advice": ["..."] }
+  ],
+  "coach": {
+    "last": { "type": "jab", "side": "left", "quality": 81, "advice": ["..."] },
+    "counts": { "jab": 3, "front_kick": 1 },
+    "total_strikes": 4,
+    "tempo_per_s": 1.2,
+    "advice": ["Extend the jab fully, then snap it straight back to your guard."]
+  },
   "difficulty": 0.41,
   "latency_ms": 31.2,
   "backend": "cpp",
   "debug_frame": "<base64-jpeg>"
 }
 ```
+
+**`movements`** — detected martial-arts techniques this frame
+(`jab`, `cross`, `hook`, `uppercut`, `front_kick`, `roundhouse_kick`,
+`knee_raise`, `block`, `guard`, `stance`), each with `side`, `quality` (0–100)
+and `advice`.
+
+**`coach`** — session coaching summary: `last` (most recent technique),
+`counts` (per-technique counters), `total_strikes`, `tempo_per_s` (strikes per
+second over the recent window) and `advice` (rotating professional coaching tips).
 
 **`feedback`** — custom message:
 ```json

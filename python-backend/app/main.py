@@ -54,6 +54,7 @@ from .engine import (
     PurePythonOpponentGenerator,
     PurePythonStyleEncoder,
 )
+from .coach import CoachEngine, MovementAnalyzer
 
 logger = logging.getLogger("hadin")
 logging.basicConfig(level=logging.INFO,
@@ -274,6 +275,8 @@ class SessionManager:
             "pose_buffer": [],     # recent normalized poses for style encoding
             "latent": [0.0] * 64,
             "style_tags": [],
+            "movement": MovementAnalyzer(),   # martial-arts movement detection
+            "coach": CoachEngine(),           # session coaching stats + advice
         }
 
     def touch(self, client_id: str) -> Optional[Dict[str, Any]]:
@@ -350,6 +353,8 @@ async def process_frame(websocket: WebSocket, client_id: str,
     draw_kps = kps or sess["last_pose"]
 
     # Update style fingerprint from normalized recent poses.
+    movements: List[Dict[str, Any]] = []
+    coach: Dict[str, Any] = {}
     if draw_kps:
         norm = [{"x": k["x"] / w, "y": k["y"] / h, "score": k["score"]}
                 for k in draw_kps]
@@ -359,6 +364,11 @@ async def process_frame(websocket: WebSocket, client_id: str,
             latent, tags = ai_core.style_from_buffer(sess["pose_buffer"])
             sess["latent"] = latent
             sess["style_tags"] = tags
+
+        # Martial-arts movement detection + coaching.
+        sess["movement"].push(norm)
+        movements = sess["movement"].analyze()
+        coach = sess["coach"].update(movements)
 
     # Debug frame with skeleton overlay.
     debug = frame.copy()
@@ -378,6 +388,9 @@ async def process_frame(websocket: WebSocket, client_id: str,
         draw_opponent(debug, opp_scaled)
 
     feedback = build_feedback(sess, draw_kps)
+    # Merge the coach's advice into the feedback shown to the trainee.
+    if coach.get("advice"):
+        feedback["notes"] = (coach["advice"] + feedback.get("notes", []))[:3]
     latency_ms = (time.perf_counter() - t0) * 1000.0
 
     payload = {
@@ -386,6 +399,8 @@ async def process_frame(websocket: WebSocket, client_id: str,
         "keypoints": draw_kps,
         "opponent": opponent,
         "feedback": feedback,
+        "movements": movements,
+        "coach": coach,
         "difficulty": round(sess["difficulty"], 2),
         "latency_ms": round(latency_ms, 2),
         "backend": ai_core.backend,
@@ -409,6 +424,8 @@ async def handle_json(websocket: WebSocket, client_id: str, text: str) -> None:
             sess["frames"] = 0
             sess["pose_buffer"] = []
             ai_core._style_py.reset()
+            sess["movement"].reset()
+            sess["coach"].reset()
         await websocket.send_json({"type": "reset_ack", "difficulty": 0.4})
     elif msg_type == "feedback_text":
         await websocket.send_json({"type": "feedback",

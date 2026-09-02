@@ -54,11 +54,24 @@
         <!-- Feedback panel -->
         <section class="feedback" id="feedbackPanel">
             <div class="feedback-head">
-                <h2>Coach Feedback</h2>
+                <h2>🥊 AI Coach</h2>
                 <span class="grade" id="grade">C</span>
             </div>
+
+            <!-- Detected technique + quality -->
+            <div class="coach-move" id="coachMove">
+                <span class="coach-move-name" id="moveName">—</span>
+                <span class="coach-move-side" id="moveSide"></span>
+                <span class="coach-move-q" id="moveQ"></span>
+                <div class="quality-bar"><div class="quality-fill" id="qualityFill" style="width:0%"></div></div>
+            </div>
+
+            <!-- Technique counters -->
+            <div class="coach-counts" id="coachCounts"></div>
+
+            <!-- Coaching advice -->
             <ul class="feedback-list" id="feedbackList">
-                <li>Start your session to receive live coaching.</li>
+                <li>Press Start and train — your AI coach watches every move.</li>
             </ul>
         </section>
     </main>
