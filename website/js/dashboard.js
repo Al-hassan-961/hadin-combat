@@ -291,4 +291,19 @@
         if (ve.file) ve.file.addEventListener('change', () => uploadVideo(ve.file.files[0]));
         if (ve.scrub) ve.scrub.addEventListener('input', onScrub);
     });
+
+    // ---- Summary overlay close helper ------------------------------------------
+    // The match-summary modal lives on the training page (app.js binds Done/X
+    // there). This guarded helper is exposed for this page too, and binds the
+    // same controls whenever #summaryMask is present (e.g. if reused here).
+    function closeSummary() {
+        const m = document.getElementById('summaryMask');
+        if (m) m.classList.remove('open');
+    }
+    window.closeSummary = closeSummary;
+    document.addEventListener('DOMContentLoaded', () => {
+        const bind = (el) => el && el.addEventListener('click', closeSummary);
+        bind(document.getElementById('summaryClose'));
+        bind(document.getElementById('summaryOk'));
+    });
 })();

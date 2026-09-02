@@ -451,6 +451,19 @@ body {
     background: rgba(5, 5, 10, 0.85);
     display: flex; align-items: center; justify-content: center;
     padding: 16px;
+    /* Hidden by default; the .open class fades it in/out. Using opacity +
+       visibility (NOT display:none) keeps the fade transition working and
+       guarantees the overlay never traps clicks while closed (fixes the
+       Done/X buttons "hanging"). */
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.25s ease, visibility 0.25s ease;
+}
+.modal-mask.open {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
 }
 .modal {
     width: 100%; max-width: 420px; max-height: 86vh; overflow-y: auto;

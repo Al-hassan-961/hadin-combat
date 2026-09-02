@@ -518,6 +518,35 @@
     }
 
     // ---- MATCH SUMMARY MODAL --------------------------------------------------
+    // ---- MATCH SUMMARY MODAL (class-based open/close with fade) -------------
+    function openSummary() {
+        const m = document.getElementById('summaryMask');
+        if (m) {
+            m.classList.add('open');
+            m.setAttribute('aria-hidden', 'false');
+        }
+    }
+
+    function closeSummary() {
+        const m = document.getElementById('summaryMask');
+        if (m) {
+            m.classList.remove('open');   // CSS fades it out + disables clicks
+            m.setAttribute('aria-hidden', 'true');
+        }
+
+        // Reset UI state so the main interface is fully interactive again.
+        if (running) {
+            running = false;
+            stopCamera();
+        }
+        if (els.startBtn) {
+            els.startBtn.textContent = '▶ Start';
+            els.startBtn.classList.remove('recording');
+        }
+        els.stageMessage = els.stageMessage || document.getElementById('stageMessage');
+        if (els.stageMessage && !stream) els.stageMessage.style.display = 'flex';
+    }
+
     function showMatchSummary(s) {
         const g = (id) => document.getElementById(id);
         if (!g('summaryMask')) return;
@@ -537,12 +566,12 @@
             li.textContent = tip;
             ul.appendChild(li);
         });
-        g('summaryMask').hidden = false;
+        openSummary();
     }
 
+    // Backwards-compatible alias used by older call sites.
     function hideMatchSummary() {
-        const m = document.getElementById('summaryMask');
-        if (m) m.hidden = true;
+        closeSummary();
     }
 
     function updateFeedback(fb) {
@@ -595,10 +624,23 @@
         }
     });
 
+    // Bind the summary overlay close controls once (Done, X, backdrop, Escape).
+    const summaryMask = document.getElementById('summaryMask');
     const summaryClose = document.getElementById('summaryClose');
     const summaryOk = document.getElementById('summaryOk');
-    if (summaryClose) summaryClose.addEventListener('click', hideMatchSummary);
-    if (summaryOk) summaryOk.addEventListener('click', hideMatchSummary);
+    const onSummaryClose = (ev) => { if (ev) ev.preventDefault(); closeSummary(); };
+    if (summaryClose) summaryClose.addEventListener('click', onSummaryClose);
+    if (summaryOk) summaryOk.addEventListener('click', onSummaryClose);
+    if (summaryMask) {
+        summaryMask.addEventListener('click', (ev) => {
+            if (ev.target === summaryMask) closeSummary();   // click backdrop
+        });
+        document.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Escape') closeSummary();
+        });
+    }
+    // Expose so other pages (or inline handlers) can close it too.
+    window.closeSummary = closeSummary;
 
     els.resetBtn.addEventListener('click', () => {
         if (ws && ws.readyState === WebSocket.OPEN) {
