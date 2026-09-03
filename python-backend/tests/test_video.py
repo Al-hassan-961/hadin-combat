@@ -184,3 +184,96 @@ def test_adversarial_noise_is_bounded():
     assert total < 50
     assert "rate_limited" in result
     assert all((e.get("confidence") or 0) >= 0.6 for e in result["timeline"])
+
+
+# ---------------------------------------------------------------------------
+# Regression: ONE physical technique must be counted exactly ONCE.
+# Before this fix an axe kick (which rises like a front kick, then drops) was
+# reported as front_kick + axe_kick (and even repeated across sliding windows),
+# and a superman punch as superman_punch + jab + hook. See strike_detector's
+# _same_event (family dedupe) and FramePipeline's one-strike-per-run model.
+# ---------------------------------------------------------------------------
+def _run(frames, label=None):
+    idx = [0]
+    def pose_fn(frame):
+        f = frames[idx[0]] if idx[0] < len(frames) else frames[-1]
+        idx[0] += 1
+        return f
+    dur = len(frames) / 10.0
+    return analyze_frames_iter(pose_fn,
+                               iter([np.zeros((H, W, 3), dtype=np.uint8)
+                                     for _ in frames]),
+                               fps=10, duration_hint=dur)
+
+
+def _base_px():
+    return make_pose_px()
+
+
+def _axe_motion(rest=22):
+    """One continuous axe kick: ankle rises high, then slams straight down."""
+    base = _base_px()
+    fr = [base for _ in range(8)]
+    for i in range(1, 6):
+        p = [dict(k) for k in fr[-1]]
+        p[16] = {"x": W * 0.5, "y": H * (0.5 - 0.4 * (i / 6)), "score": 1.0}
+        fr.append(p)
+    for i in range(1, 5):
+        p = [dict(k) for k in fr[-1]]
+        p[16] = {"x": W * 0.5, "y": H * (0.1 + 0.4 * (i / 5)), "score": 1.0}
+        fr.append(p)
+    fr += [base for _ in range(rest)]
+    return fr
+
+
+def _hook_motion(hand=9, rest=22):
+    """One clean punch: wrist drives laterally out, holds, then returns."""
+    base = _base_px()
+    fr = [base for _ in range(6)]
+    for i in range(1, 6):
+        p = [dict(k) for k in fr[-1]]
+        t = i / 6
+        p[hand] = {"x": W * (0.5 + (0.25 * t if hand == 9 else -0.25 * t)),
+                   "y": H * 0.51, "score": 1.0}
+        fr.append(p)
+    for _ in range(5):
+        fr.append([dict(k) for k in fr[-1]])
+    for i in range(1, 7):
+        p = [dict(k) for k in fr[-1]]
+        t = i / 7
+        p[hand] = _base_px()[hand]
+        fr.append(p)
+    fr += [base for _ in range(rest)]
+    return fr
+
+
+def test_one_axe_kick_counts_once():
+    res = _run(_axe_motion())
+    assert res["summary"]["total_strikes"] == 1, res["timeline"]
+    types = [e["type"] for e in res["timeline"]]
+    assert types == ["axe_kick"], types          # NOT front_kick + axe_kick
+
+
+def test_one_punch_counts_once():
+    res = _run(_hook_motion())
+    assert res["summary"]["total_strikes"] == 1, res["timeline"]
+    # Every timeline entry must carry a confident strike type.
+    assert all((e.get("confidence") or 0) >= 0.6 for e in res["timeline"])
+
+
+def test_three_separate_punches_count_three():
+    res = _run(_hook_motion(hand=9) + _hook_motion(hand=10) + _hook_motion(hand=9))
+    assert res["summary"]["total_strikes"] == 3, res["timeline"]
+    types = [e["type"] for e in res["timeline"]]
+    assert types == ["hook", "cross", "hook"], types
+
+
+def test_same_event_family_dedupe():
+    from app.strike_detector import _same_event
+    # An axe kick is also a front kick until the drop; superman also a punch.
+    assert _same_event("front_kick", "axe_kick") is True
+    assert _same_event("axe_kick", "front_kick") is True
+    assert _same_event("jab", "superman_punch") is True
+    # Genuinely different techniques are NOT the same event.
+    assert _same_event("jab", "cross") is False
+    assert _same_event("jab", "axe_kick") is False

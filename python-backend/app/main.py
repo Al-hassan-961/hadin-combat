@@ -53,7 +53,8 @@ from .engine import (
     PurePythonStyleEncoder,
 )
 from .coach import CoachEngine, MovementAnalyzer
-from .analytics import (FatigueTracker, build_session_summary)
+from .analytics import (FatigueTracker, build_session_summary, is_landed,
+                        performance_score)
 from .video_analyzer import (VideoJobManager, _mean_joint_disp, speed_band)
 from .coach import L_ANKLE, L_WRIST, R_ANKLE, R_WRIST
 
@@ -109,16 +110,36 @@ class AICore:
         self._coevolution = None  # C++ CoEvolution
         self._mp_pose = None      # MediaPipe Pose
         self._motion = None       # OpenCV motion fallback
+        # The pose backends (MediaPipe / MOG2 / C++) are NOT thread-safe and are
+        # shared by the WS event loop AND the offline video-analysis worker
+        # threads. Serialize every call so a live session cannot corrupt the
+        # tracker mid-analysis (and vice-versa).
+        self._pose_lock = __import__("threading").Lock()
         # Runtime watchdog state (graceful degradation / self-recovery).
         self._pose_misses = 0
         self._backend_errors = 0
 
+        # Load EVERY backend that is importable. They are all kept alive so a
+        # runtime degrade (C++ errors -> MediaPipe -> OpenCV motion) can switch
+        # to an already-initialised object instead of needing a reboot. The
+        # active backend below is simply the best one that loaded.
         self._load_cpp_core()
-        if self.backend == "none" and FALLBACK_TO_PYTHON:
+        if FALLBACK_TO_PYTHON:
             self._load_mediapipe()
-        if self.backend == "none":
-            self._load_motion()
+        self._load_motion()
+        self._pick_backend()
         logger.info("HADIN: active backend = %s", self.backend)
+
+    def _pick_backend(self) -> None:
+        """Select the best backend among those actually available."""
+        if self._pose is not None and getattr(self._pose, "is_ready", lambda: False)():
+            self.backend = "cpp"
+        elif self._mp_pose is not None:
+            self.backend = "mediapipe"
+        elif self._motion is not None:
+            self.backend = "opencv"
+        else:
+            self.backend = "none"
 
     # ---- backend loading --------------------------------------------------
     def _load_cpp_core(self) -> None:
@@ -135,13 +156,11 @@ class AICore:
                 str(MODEL_PATHS["opponent"]))
             self._coevolution = hadin_core.CoEvolution(str(MODEL_PATHS["coevolution"]))
             if self._pose.is_ready():
-                self.backend = "cpp"
                 logger.info("HADIN: C++ ONNX core loaded (sub-50ms inference).")
             else:
                 logger.warning("HADIN: C++ pose model not ready; will fall back.")
         except Exception as exc:  # noqa: BLE001
             logger.warning("HADIN: C++ core load failed (%s). Falling back.", exc)
-            self.backend = "none"
 
     def _load_mediapipe(self) -> None:
         try:
@@ -153,29 +172,32 @@ class AICore:
                 min_detection_confidence=0.5,
                 min_tracking_confidence=0.5,
             )
-            self.backend = "mediapipe"
-            logger.info("HADIN: MediaPipe pose fallback active.")
+            logger.info("HADIN: MediaPipe pose fallback ready.")
         except Exception as exc:  # noqa: BLE001
             logger.error("HADIN: MediaPipe fallback unavailable (%s).", exc)
-            self.backend = "none"
 
     def _load_motion(self) -> None:
         try:
             self._motion = MotionPoseEstimator()
-            self.backend = "opencv"
-            logger.warning("HADIN: OpenCV motion fallback active (degraded mode).")
+            logger.warning("HADIN: OpenCV motion fallback ready (degraded mode).")
         except Exception as exc:  # noqa: BLE001
             logger.error("HADIN: Motion fallback unavailable (%s).", exc)
-            self.backend = "none"
 
     # ---- pose estimation ----------------------------------------------------
     def pose_keypoints(self, frame: np.ndarray) -> Optional[List[Dict[str, float]]]:
         """Return COCO-style keypoints [{"x","y","score"}] in raw pixels.
 
-        Never raises: on a backend error it degrades to the next available
+        Never raises: on a backend error (or a long run of EMPTY results, e.g.
+        a C++ core with missing weights) it degrades to the next available
         backend and continues; a long streak of misses resets the motion
         background model so the tracker can recover from drift.
         """
+        # Serialize with the video-analysis worker threads (the backends are
+        # not thread-safe and are shared across live + offline sessions).
+        with self._pose_lock:
+            return self._pose_keypoints_locked(frame)
+
+    def _pose_keypoints_locked(self, frame: np.ndarray) -> Optional[List[Dict[str, float]]]:
         kps: Optional[List[Dict[str, float]]] = None
         try:
             if self.backend == "cpp":
@@ -194,7 +216,13 @@ class AICore:
             self._pose_misses = 0
             return kps
 
+        # No keypoints: a healthy pose backend normally produces them. Count a
+        # miss so a SILENT-EMPTY backend (e.g. C++ with no model weights) is
+        # eventually degraded just like an erroring one.
         self._pose_misses += 1
+        if self.backend != "opencv":
+            self._backend_errors += 1
+            self._degrade_if_stuck()
         # Recover the motion fallback if it has drifted (e.g. background
         # changed or the subject left and returned).
         if self.backend == "opencv" and self._motion is not None \
@@ -207,14 +235,16 @@ class AICore:
     def _degrade_if_stuck(self) -> None:
         if self._backend_errors < 10:
             return
+        # Step DOWN the chain: C++ -> MediaPipe -> OpenCV motion.
         if self.backend == "cpp" and self._mp_pose is not None:
             self.backend = "mediapipe"
+            logger.warning("HADIN: degraded active backend to 'mediapipe'.")
         elif self.backend in ("cpp", "mediapipe") and self._motion is not None:
             self.backend = "opencv"
+            logger.warning("HADIN: degraded active backend to 'opencv'.")
         elif self.backend == "opencv" and self._motion is not None:
             # Motion itself is failing; keep it but reset on the next miss.
             pass
-        logger.warning("HADIN: degraded active backend to '%s'.", self.backend)
         self._backend_errors = 0
 
     def _pose_cpp(self, frame: np.ndarray) -> Optional[List[Dict[str, float]]]:
@@ -393,8 +423,8 @@ def _compose_session_summary(client_id: str, sess: Dict[str, Any],
         m = {}
     total = sess.get("_strikes_seen", 0)
     quality_list = sess.get("quality_list") or []
-    # "Landed" = clean technique (quality >= 70 OR very high confidence >= 0.8).
-    landed = sum(1 for q, c in quality_list if q >= 70 or c >= 0.8)
+    # "Landed" = clean technique (quality/confidence threshold) — shared logic.
+    landed = sum(1 for q, c in quality_list if is_landed(q, c))
 
     reaction = m.get("reaction_s") if total > 0 else None
     summ = build_session_summary(
@@ -513,16 +543,25 @@ async def process_frame(websocket: WebSocket, client_id: str,
         candidate = gate.pick(movements)
         accepted = candidate is not None and gate.accept(now, candidate, speed_per_s)
 
+        calibrating = bool(sess.get("_cal"))
+
         if accepted:
-            coach = sess["coach"].update([candidate], now=now)
-            sess["_strikes_seen"] = sess.get("_strikes_seen", 0) + 1
-            snap = min(1.0, speed_per_s / 2.0) if speed_per_s > 0.2 else (
-                float(candidate.get("confidence", 0.5)) * 0.5 +
-                (float(candidate.get("quality", 50)) / 100.0) * 0.5)
-            sess["fatigue"].observe_strike(snap, now)
-            sess.setdefault("quality_list", []).append(
-                [candidate.get("quality", 0), candidate.get("confidence", 0)])
-            _maybe_calibrate(websocket, client_id, sess, candidate, speed_per_s)
+            if calibrating:
+                # Calibration punches personalise the thresholds only — they
+                # must NOT count toward the session's strikes/fatigue/quality.
+                coach = sess["coach"].update([], now=now)
+                _maybe_calibrate(websocket, client_id, sess, candidate, speed_per_s)
+            else:
+                coach = sess["coach"].update([candidate], now=now)
+                sess["_strikes_seen"] = sess.get("_strikes_seen", 0) + 1
+                snap = min(1.0, speed_per_s / 2.0) if speed_per_s > 0.2 else (
+                    float(candidate.get("confidence", 0.5)) * 0.5 +
+                    (float(candidate.get("quality", 50)) / 100.0) * 0.5)
+                sess["fatigue"].observe_strike(snap, now)
+                sess.setdefault("quality_list", []).append(
+                    [candidate.get("quality", 0), candidate.get("confidence", 0)])
+                ql = sess.get("quality_list") or []
+                sess["_quality_running"] = sum(x[0] for x in ql) / len(ql) if ql else 0
         else:
             coach = sess["coach"].update([], now=now)
 
@@ -594,6 +633,20 @@ async def process_frame(websocket: WebSocket, client_id: str,
     tip = (notes[0] if notes else
            "Breathe, stay light, and keep your hands high.")
 
+    # Live performance estimate for the canonical #performanceScore tile. The
+    # full score is only finalised in the match summary; this is a rolling
+    # proxy (0-100) so the live panel shows something meaningful mid-session.
+    quality_list = sess.get("quality_list") or []
+    total_so_far = sess.get("_strikes_seen", 0)
+    live_landed = sum(1 for q, c in quality_list if is_landed(q, c))
+    live_acc = (live_landed / total_so_far) if total_so_far else 0.0
+    live_quality = sess.get("_quality_running", 0) or 0
+    try:
+        live_perf = performance_score(
+            live_acc, live_quality, coach.get("tempo_per_s", 0), fatigue["score"])
+    except Exception:  # noqa: BLE001
+        live_perf = 0
+
     analysis = {
         "strike": strike,
         "fatigue_score": fatigue["score"],
@@ -606,6 +659,7 @@ async def process_frame(websocket: WebSocket, client_id: str,
         "speed_band": speed_band_live,
         "tip": tip,
         "action": action,
+        "performance": live_perf,
     }
 
     # NOTE: no debug frame is sent back — the browser draws the overlays on
@@ -774,8 +828,10 @@ def _improvement_suggestions() -> List[str]:
     """Derive personalized suggestions from recent session history."""
     if not HISTORY:
         return ["Complete a session to receive personalized improvement tips."]
-    total = {"jab": 0, "cross": 0, "hook": 0, "uppercut": 0,
-             "front_kick": 0, "roundhouse_kick": 0}
+    # Consider EVERY technique the coach can detect (incl. complex strikes) so
+    # "most used" here matches the summary's most_used_technique().
+    from .coach import STRIKE_TYPES
+    total: Dict[str, int] = {t: 0 for t in STRIKE_TYPES}
     best: Optional[Tuple[str, int]] = None
     for h in HISTORY:
         for t, c in (h.get("techniques") or {}).items():
@@ -899,6 +955,11 @@ async def ws_endpoint(websocket: WebSocket, **kwargs: Any) -> None:
     sessions.create(client_id)
     logger.info("WS connect: %s", client_id)
     sess = sessions.sessions[client_id]
+
+    # Idle reaping: a socket that sends NO pong/bytes for this long is dead
+    # (killed silently by a proxy, no FIN). We wrap receive() in a timeout so
+    # we do not block forever and leak the session dict + coroutines.
+    RECEIVE_IDLE_TIMEOUT = 90.0
     try:
         await websocket.send_json({
             "type": "hello",
@@ -919,7 +980,13 @@ async def ws_endpoint(websocket: WebSocket, **kwargs: Any) -> None:
         ka = asyncio.create_task(_keepalive())
 
         while True:
-            message = await websocket.receive()
+            try:
+                message = await asyncio.wait_for(
+                    websocket.receive(), timeout=RECEIVE_IDLE_TIMEOUT)
+            except asyncio.TimeoutError:
+                # No frame/pong in a long while -> the peer is gone. Reap it.
+                logger.info("WS idle timeout, closing: %s", client_id)
+                break
 
             try:  # isolate one bad frame/message so it can't kill the session
                 if "bytes" in message and message["bytes"]:
@@ -942,7 +1009,16 @@ async def ws_endpoint(websocket: WebSocket, **kwargs: Any) -> None:
             ka.cancel()
         except Exception:  # noqa: BLE001
             pass
-        _record_history(client_id, sessions.sessions.pop(client_id, None))
+        # Same-id reconnect race guard: only the connection that OWNS the
+        # current session dict may pop + archive it. If an old socket from the
+        # same page was superseded by a reconnect, its stale finally must NOT
+        # destroy the newer session (which it never created).
+        if sessions.sessions.get(client_id) is sess:
+            sessions.sessions.pop(client_id, None)
+            # Don't pollute the performance dashboard with empty sessions
+            # (camera denied, instant close, zero frames / zero strikes).
+            if sess.get("frames", 0) > 3 or sess.get("_strikes_seen", 0) > 0:
+                _record_history(client_id, sess)
 
 
 # ---- Starlette application (FastAPI-free: zero compiled dependencies) ----------

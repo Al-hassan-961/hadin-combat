@@ -379,3 +379,57 @@ body::after {
 .switch-row input:checked + .switch { background: var(--grad-primary); }
 .switch-row input:checked + .switch::after { transform: translateX(20px); }
 .switch-row input:focus-visible + .switch { outline: 2px solid var(--electric); outline-offset: 2px; }
+
+/* ---------- 17. Mobile-first accessibility: 44px touch targets ----------- */
+/* Buttons / interactive chips / nav links must be thumb-friendly (>=44px) on
+   coarse pointers, and small icon buttons get a padded hit-area so the visual
+   stays compact while the tap target meets the guideline. */
+@media (pointer: coarse) {
+    .btn,
+    .chip-btn,
+    .hero-cta,
+    .connect-copy,
+    .connect-btn { min-height: 44px; }
+
+    .nav-link,
+    .modal-go { min-height: 44px; display: inline-flex; align-items: center; }
+
+    .controls-toggles .btn { min-height: 44px; }
+
+    .icon-btn {
+        width: 44px; height: 44px;
+    }
+    .connect-copy {
+        width: 44px; height: 44px; font-size: 1.05rem;
+        display: inline-grid; place-items: center;
+    }
+    .modal-close {
+        min-width: 44px; min-height: 44px;
+        display: grid; place-items: center;
+    }
+    .switch-row { padding: 14px 4px; }
+    .switch { width: 52px; height: 32px; }
+    .switch::after { width: 26px; height: 26px; top: 3px; left: 3px; }
+    .switch-row input:checked + .switch::after { transform: translateX(20px); }
+}
+
+/* ---------- 18. Light-theme readability fixes ---------------------------- */
+/* Dark-only gradients/glass in the base theme are unreadable when the page is
+   flipped to light mode; neutralise them so light text never sits on light. */
+html.light .brand-text h1 {
+    background: none; -webkit-background-clip: initial; color: var(--text-hi);
+}
+html.light .brand-text h1 .accent { color: var(--indigo); }
+html.light .hero-stat .num,
+html.light .card-num {
+    background: none; -webkit-background-clip: initial; color: var(--text-hi);
+}
+html.light .modal { background: rgba(255, 255, 255, 0.97); }
+html.light .modal .feedback-head h2 {
+    background: none; -webkit-background-clip: initial; color: var(--text-hi);
+}
+html.light .toast {
+    background: rgba(255, 255, 255, 0.97); color: var(--text-hi);
+    border-color: rgba(11, 18, 32, 0.12);
+}
+html.light .offline-banner { color: #fff; }

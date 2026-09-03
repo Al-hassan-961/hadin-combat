@@ -27,9 +27,13 @@ RUN pip install --prefix=/install -r /build/requirements.txt \
 FROM python:3.11-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
-    USE_CPP_CORE=${USE_CPP_CORE:-true} \
-    FALLBACK_TO_PYTHON=${FALLBACK_TO_PYTHON:-true} \
-    REDIS_URL=redis://redis:6379/0
+    # The container image does NOT ship the compiled C++ core or .onnx models
+    # (only model READMEs + pybind sources), so the Python-only pipeline is the
+    # active engine. Pose degrades C++->MediaPipe->OpenCV automatically; to use
+    # the C++ core, build cpp/ and mount models/ at runtime, then set true.
+    USE_CPP_CORE=${USE_CPP_CORE:-false} \
+    FALLBACK_TO_PYTHON=true \
+    REDIS_URL=
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 libglib2.0-0 \
@@ -42,7 +46,12 @@ COPY python-backend/ /app/
 COPY website/ /app/static/
 COPY models/ /app/models/
 
+# Persistent session history / uploads / preferences (bind a volume).
+ENV HADIN_DATA_DIR=/app/data
+RUN mkdir -p /app/data/uploads /app/data
+VOLUME ["/app/data"]
+
 EXPOSE 8000
 
-# Prefer the C++ core when built; gracefully falls back to MediaPipe.
+# Python-first engine; graceful fallback C++ -> MediaPipe -> OpenCV motion.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

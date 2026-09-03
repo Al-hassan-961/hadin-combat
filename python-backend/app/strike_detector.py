@@ -17,12 +17,26 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from .coach import STRIKE_TYPES
+from .coach import COMPLEX_OVERRIDES, STRIKE_TYPES
 
 MIN_CONFIDENCE = 0.6        # 60% — only confident strikes are counted
 UNCERTAIN_LO = 0.35         # below this: noise, discarded entirely
 COOLDOWN_S = 0.35           # seconds between two accepted strikes
 SAME_TYPE_WINDOW = 0.9      # same technique within this window = one strike
+
+
+def _same_event(a: str, b: str) -> bool:
+    """Two types describe the SAME physical technique.
+
+    A complex technique (axe kick) also trips its basic detector (front kick)
+    in the frames just before the complex signature fully forms. Treating them
+    as one event prevents a single technique from being double-counted across
+    the onset/full-motion boundary. Returns True for identical types or when
+    one overrides the other.
+    """
+    if a == b:
+        return True
+    return b in COMPLEX_OVERRIDES.get(a, set()) or a in COMPLEX_OVERRIDES.get(b, set())
 
 
 def confidence_state(conf: float) -> str:
@@ -109,7 +123,7 @@ class StrikeGate:
             return False
         if t < self._until:                     # cooldown
             return False
-        if detection["type"] == self._last_type \
+        if _same_event(detection["type"], self._last_type) \
                 and (t - self._last_time) < SAME_TYPE_WINDOW:
             return False                        # duplicate of the same motion
         self._until = t + self.cooldown

@@ -200,6 +200,7 @@
     };
     let videoData = null;
     let videoUrl = null;
+    let pollToken = null;   // cancellation token for the analysis poll loop
 
     function showStrikeAt(t) {
         if (!videoData) return;
@@ -216,6 +217,10 @@
 
     async function uploadVideo(file) {
         if (!file) return;
+        // Cancel any prior poll loop so two jobs never race on the same DOM.
+        if (pollToken) { pollToken.cancelled = true; pollToken = null; }
+        const token = { cancelled: false };
+        pollToken = token;
         ve.error.textContent = '';
         ve.result.hidden = true;
         ve.track.hidden = false;
@@ -237,12 +242,17 @@
             ve.error.textContent = 'Upload error: ' + err.message;
             return;
         }
-        // Poll
-        for (;;) {
+        // Poll with a hard cap so a dead job can never poll forever.
+        const MAX_POLLS = 400;                  // ~10 minutes of retries
+        let polls = 0;
+        while (polls++ < MAX_POLLS) {
             await new Promise((r) => setTimeout(r, 1500));
+            if (token.cancelled) return;        // a newer upload superseded us
             let job;
             try {
-                job = await (await fetch('/api/analyze/' + jobId)).json();
+                const resp = await fetch('/api/analyze/' + jobId);
+                if (!resp.ok) throw new Error('job not found');
+                job = await resp.json();
             } catch (_) { continue; }
             if (ve.fill) { ve.fill.style.width = (job.progress || 0) + '%'; ve.pct.textContent = Math.round(job.progress || 0) + '%'; }
             ve.status.textContent = job.status === 'processing'
@@ -250,6 +260,7 @@
             if (job.status === 'done') { renderVideoResult(job.result); return; }
             if (job.status === 'error') { ve.error.textContent = 'Analysis error: ' + (job.error || '?'); return; }
         }
+        ve.error.textContent = 'Analysis timed out — the video may be too long. Try a shorter clip.';
     }
 
     function renderVideoResult(result) {

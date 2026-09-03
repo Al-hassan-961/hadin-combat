@@ -29,9 +29,10 @@ import time
 import uuid
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence
 
-from .analytics import FatigueTracker, build_session_summary
-from .coach import (L_ANKLE, L_WRIST, R_ANKLE, R_WRIST, CoachEngine,
-                    MovementAnalyzer)
+from .analytics import (LANDED_CONFIDENCE, LANDED_QUALITY, FatigueTracker,
+                        build_session_summary, is_landed)
+from .coach import (COMPLEX_TYPES, L_ANKLE, L_WRIST, R_ANKLE, R_WRIST,
+                    CoachEngine, MovementAnalyzer)
 from .strike_detector import StrikeGate, UNCERTAIN_LO, confidence_state
 
 PoseFn = Callable[[Any], Optional[List[Dict[str, float]]]]
@@ -39,6 +40,10 @@ PoseFn = Callable[[Any], Optional[List[Dict[str, float]]]]
 FATIGUE_SAMPLE_S = 0.5     # seconds between fatigue-curve samples
 TARGET_FPS = 10            # analyse at ~10 fps regardless of source fps
 ONSET_SPEED = 0.30         # speed (norm units / s) that marks a movement onset
+SETTLE_SPEED = 0.15        # below this a burst has ended (one strike per burst)
+MAX_BURST_S = 1.6          # longest a single continuous technique may last
+QUIET_RUN_S = 0.45         # no detection for this long ends a technique run
+MIN_STRIKE_GAP_S = 0.35    # min gap before a new technique can start
 MAX_STRIKES_PER_SEC = 4.0  # hard physiological ceiling for the safety cap
 UNCERTAIN_WINDOW = 0.5     # how long an 'uncertain' note stays visible
 
@@ -94,10 +99,68 @@ class FramePipeline:
         self.uncertain: int = 0                         # suppressed <60% conf
         self.reaction_samples: List[float] = []         # onset->strike gaps
         self._t_last_fatigue = -1.0
-        self._onset: Optional[float] = None
-        self._last_accepted = -1.0
+        # ---- movement-episode state ------------------------------------------
+        # One continuous run of confident detections = at most ONE accepted
+        # strike. A rising ankle that then drops into an axe kick is a SINGLE
+        # physical technique; it emits front_kick then axe_kick across frames,
+        # so committing each windowed detection would count it 2-3x (the
+        # original 677-strike over-count). We instead remember the best
+        # (most-specific) candidate of a run and commit once the detections
+        # fall quiet for QUIET_RUN_S.
+        self._run: bool = False              # inside a detection run
+        self._run_best: Optional[Dict[str, Any]] = None
+        self._run_onset: Optional[float] = None
+        self._run_last_det: float = -1.0
+        self._last_strike_t: float = -1.0
 
     # ------------------------------------------------------------- per frame --
+    @staticmethod
+    def _prefer(probe: Dict[str, Any], incumbent: Optional[Dict[str, Any]]) -> bool:
+        """Should `probe` replace `incumbent` as this run's best candidate?
+
+        Complex techniques beat basic ones (an axe kick IS the whole motion,
+        not a front kick); otherwise higher confidence + quality wins.
+        """
+        if incumbent is None:
+            return True
+        pc = probe.get("type") in COMPLEX_TYPES
+        ic = incumbent.get("type") in COMPLEX_TYPES
+        if pc != ic:
+            return pc
+        return (probe.get("confidence", 0) or 0) > (incumbent.get("confidence", 0) or 0)
+
+    def _commit_strike(self, t_s: float) -> None:
+        """Record the current run's best candidate as ONE accepted strike."""
+        candidate = self._run_best
+        self._run = False
+        self._run_best = None
+        onset = self._run_onset
+        self._run_onset = None
+        self._last_strike_t = t_s
+        if candidate is None:
+            return
+        # Reaction = onset -> accepted strike.
+        if onset is not None and t_s > onset:
+            self.reaction_samples.append(
+                min(1.5, max(0.05, round(t_s - onset, 2))))
+        else:
+            self.reaction_samples.append(-1.0)      # sentinel: not measured
+
+        self.coach.update([candidate], now=t_s)
+        # Fatigue "snap" from the ACTUAL measured speed.
+        snap = min(1.0, self.speed_per_s / 2.0) if self.speed_per_s > 0.2 \
+            else (float(candidate.get("confidence", 0.5)) * 0.5 +
+                  (float(candidate.get("quality", 50)) / 100.0) * 0.5)
+        self.fatigue.observe_strike(snap, t_s)
+        self.timeline.append({
+            "t": round(t_s, 2),
+            "type": candidate.get("type"),
+            "side": candidate.get("side"),
+            "quality": candidate.get("quality"),
+            "confidence": candidate.get("confidence"),
+            "state": confidence_state(float(candidate.get("confidence", 0))),
+        })
+
     def step(self, kps_px: Optional[List[Dict[str, float]]],
              w: int, h: int, t_s: float, sample_fps: float = TARGET_FPS) -> None:
         norm = _norm(kps_px, w, h) if kps_px else None
@@ -113,59 +176,43 @@ class FramePipeline:
             self.fatigue.observe_stance(norm)
             self.movement.push(norm)
 
-        # Track movement onset for reaction measurement.
-        if self.speed_per_s >= ONSET_SPEED and self._onset is None \
-                and (t_s - self._last_accepted) > 0.5:
-            self._onset = t_s
-        elif self.speed_per_s < ONSET_SPEED * 0.5 and self._onset is not None:
-            # Movement ended without a strike - forget the stale onset.
-            if (t_s - self._onset) > 0.9:
-                self._onset = None
-
         detections = self.movement.analyze()
         candidate = self.gate.pick(detections)
 
-        if candidate is not None and self.gate.accept(t_s, candidate, self.speed_per_s):
-            # Reaction = onset -> accepted strike.
-            if self._onset is not None and t_s > self._onset:
-                self.reaction_samples.append(
-                    min(1.5, max(0.05, round(t_s - self._onset, 2))))
-            else:
-                self.reaction_samples.append(-1.0)      # sentinel: not measured
-            self._onset = None
-            self._last_accepted = t_s
+        # ---- one-strike-per-detection-run state machine ---------------------
+        if candidate is not None:
+            self._run_last_det = t_s
+            if not self._run:
+                # Start a new run only if the previous strike is old enough.
+                if (t_s - self._last_strike_t) >= MIN_STRIKE_GAP_S:
+                    self._run = True
+                    self._run_onset = t_s
+                    self._run_best = candidate
+            elif self._prefer(candidate, self._run_best):
+                self._run_best = candidate
+        elif self._run and (t_s - self._run_last_det) > QUIET_RUN_S:
+            # Detections have gone quiet long enough -> the technique finished.
+            self._commit_strike(t_s)
 
-            self.coach.update([candidate], now=t_s)
-            # Fatigue "snap" from the ACTUAL measured speed.
-            snap = min(1.0, self.speed_per_s / 2.0) if self.speed_per_s > 0.2 \
-                else (float(candidate.get("confidence", 0.5)) * 0.5 +
-                      (float(candidate.get("quality", 50)) / 100.0) * 0.5)
-            self.fatigue.observe_strike(snap, t_s)
-            self.timeline.append({
-                "t": round(t_s, 2),
-                "type": candidate.get("type"),
-                "side": candidate.get("side"),
-                "quality": candidate.get("quality"),
-                "confidence": candidate.get("confidence"),
-                "state": confidence_state(float(candidate.get("confidence", 0))),
-            })
-        else:
-            # Count suppressed near-misses for the debug report.
-            if candidate is not None or (detections and
-                    any(UNCERTAIN_LO <= float(d.get("confidence", 0)) < 0.6
-                        for d in detections if d.get("type"))):
-                # Only when a plausible strike-type moved but was rejected.
-                for d in detections:
-                    if d.get("type") and d.get("type") not in ("guard", "stance"):
-                        conf = float(d.get("confidence", 0))
-                        if UNCERTAIN_LO <= conf < 0.6:
-                            self.uncertain += 1
-                            break
+        # Count suppressed near-misses for the debug report.
+        if self._run_best is None and (candidate is not None or (detections and
+                any(UNCERTAIN_LO <= float(d.get("confidence", 0)) < 0.6
+                    for d in detections if d.get("type")))):
+            for d in detections:
+                if d.get("type") and d.get("type") not in ("guard", "stance"):
+                    conf = float(d.get("confidence", 0))
+                    if UNCERTAIN_LO <= conf < 0.6:
+                        self.uncertain += 1
+                        break
 
         # Fatigue progression curve.
         if t_s - self._t_last_fatigue >= FATIGUE_SAMPLE_S:
             self._t_last_fatigue = t_s
             self.fatigue_curve.append([round(t_s, 2), self.fatigue.score()["score"]])
+
+    def _last_accepted_frame(self) -> float:
+        """Time of the most recently accepted strike (or a very old sentinel)."""
+        return getattr(self, "_last_strike_t", -1.0)
 
     # --------------------------------------------------------------- summary --
     def summary(self, counts: Dict[str, int], duration_s: float) -> Dict[str, Any]:
@@ -173,10 +220,10 @@ class FramePipeline:
         measured = [r for r in self.reaction_samples if r and r > 0]
         reaction = (sum(measured) / len(measured)) if measured else None
         final_fatigue = self.fatigue.score()["score"] if self.fatigue_curve else None
-        # "Landed" = clean technique (quality >= 70 OR confidence >= 0.8).
+        # "Landed" = clean technique (quality >= LANDED_QUALITY OR confidence
+        # >= LANDED_CONFIDENCE) — see analytics.is_landed.
         landed = sum(1 for e in self.timeline
-                     if (e.get("quality", 0) or 0) >= 70
-                     or (e.get("confidence", 0) or 0) >= 0.8)
+                     if is_landed(e.get("quality"), e.get("confidence")))
         return build_session_summary(
             total_strikes=m["total_strikes"],
             landed=landed,
@@ -254,8 +301,7 @@ def analyze_frames_iter(pose_fn: PoseFn, frames: Iterator[Any],
     reaction = (sum(measured) / len(measured)) if measured else None
     final_fatigue = pipe.fatigue.score()["score"] if pipe.fatigue_curve else None
     landed = sum(1 for e in timeline
-                 if (e.get("quality", 0) or 0) >= 70
-                 or (e.get("confidence", 0) or 0) >= 0.8)
+                 if is_landed(e.get("quality"), e.get("confidence")))
     summary = build_session_summary(
         total_strikes=len(timeline), landed=landed, counts=counts,
         avg_quality=pipe.coach.metrics().get("avg_quality", 0),

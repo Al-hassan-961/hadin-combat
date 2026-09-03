@@ -1,36 +1,46 @@
 # ---------------------------------------------------------------------------
 # HADIN-COMBAT – Docker Compose
 # Copyright (c) 2026 Al-hassan Shehade & Dina Balcheh
+# All rights reserved.
+#
+# Full-stack deployment for the Python-first backend + static frontend.
+#
+# Honest wiring:
+#   * The app has NO code path that reads Redis today, so a Redis service is
+#     NOT started (it was previously dead wiring). To add persistence across
+#     restarts we bind a named volume to /app/data (history, uploads, JSON
+#     preferences).
+#   * The image ships the Python-only pipeline (MediaPipe/OpenCV fallback).
+#     To enable the optional C++ core, build cpp/ and mount models/*.onnx,
+#     then set USE_CPP_CORE=true below.
+#
+# Usage:  docker-compose up --build   ->  http://localhost:8000
 # ---------------------------------------------------------------------------
 services:
   backend:
     build:
       context: .
       dockerfile: python-backend/Dockerfile
+    image: hadin-combat
     container_name: hadin-backend
     ports:
       - "8000:8000"
     environment:
-      - USE_CPP_CORE=${USE_CPP_CORE:-true}
-      - FALLBACK_TO_PYTHON=${FALLBACK_TO_PYTHON:-true}
-      - REDIS_URL=redis://redis:6379/0
-      - POSE_MODEL_PATH=/app/models/pose.onnx
-      - STYLE_ENCODER_PATH=/app/models/style_encoder.onnx
-      - OPPONENT_GENERATOR_PATH=/app/models/opponent_generator.onnx
-      - COEVOLUTION_PATH=/app/models/coevolution.onnx
+      - USE_CPP_CORE=${USE_CPP_CORE:-false}
+      - FALLBACK_TO_PYTHON=true
+      - PORT=8000
+      # Optional: uncomment + set to mount pre-trained ONNX models.
+      # - POSE_MODEL_PATH=/models/pose.onnx
+      # - STYLE_ENCODER_PATH=/models/style_encoder.onnx
+      # - OPPONENT_GENERATOR_PATH=/models/opponent_generator.onnx
+      # - COEVOLUTION_PATH=/models/coevolution.onnx
     volumes:
-      - ./models:/app/models:ro
+      # Persistent session history, uploads + JSON preferences survive restarts.
+      - hadin-data:/app/data
+      # Read-only model mount (optional; enable the C++/ONNX path):
+      # - ./models:/models:ro
       - ./cpp:/app/cpp:ro
-    depends_on:
-      - redis
     restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    container_name: hadin-redis
-    restart: unless-stopped
-    volumes:
-      - redis-data:/data
 
 volumes:
-  redis-data:
+  hadin-data:

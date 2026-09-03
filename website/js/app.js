@@ -12,6 +12,7 @@
     const $ = (id) => document.getElementById(id);
 
     const els = {
+        stage: $('stage'),
         video: $('camera'),
         overlay: $('overlay'),
         startBtn: $('startBtn'),
@@ -95,7 +96,20 @@
     }
 
     // ---- WebSocket connection with auto-reconnect (backoff) -----------------
+    let reconnectTimer = null;
+    function cancelReconnect() {
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    }
+
     function connect() {
+        // Guard against duplicate sockets: if one is open or connecting, don't
+        // start another (a user pressing Start right after a network flap could
+        // otherwise open a second socket while the queued timer also fires).
+        if (ws && (ws.readyState === WebSocket.OPEN ||
+                   ws.readyState === WebSocket.CONNECTING)) {
+            return;
+        }
+        cancelReconnect();
         const proto = location.protocol === 'https:' ? 'wss' : 'ws';
         const url = `${proto}://${location.host}/ws/${CLIENT_ID}`;
         ws = new WebSocket(url);
@@ -103,7 +117,7 @@
         ws.onopen = () => {
             reconnectDelay = 800;             // reset backoff on success
             logHADIN('ws', 'OPEN ' + url);
-            setPill('connected', 'cpp');
+            setPill('connected', 'connected');
             addFeedback('Session connected. Ready to train.');
         };
 
@@ -112,13 +126,18 @@
         ws.onclose = (ev) => {
             logHADIN('ws', 'CLOSED code=' + ev.code + ' reason=' + ev.reason);
             setPill('reconnecting…', 'none');
-            setTimeout(connect, reconnectDelay);
+            if (running || true) {
+                cancelReconnect();
+                reconnectTimer = setTimeout(() => {
+                    connect();
+                }, reconnectDelay);
+            }
             reconnectDelay = Math.min(8000, reconnectDelay * 1.8);  // backoff
         };
 
         ws.onerror = (err) => {
             console.error('[HADIN:ws] error', err);
-            ws.close();
+            try { ws.close(); } catch (_) {}
         };
     }
 
@@ -130,7 +149,15 @@
             return;
         }
 
-        if (msg.type === 'ping') return;          // server keep-alive
+        if (msg.type === 'ping') {
+            // Heartbeat liveness: reply so the server can reap dead sockets.
+            try {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'pong', t: msg.t }));
+                }
+            } catch (_) {}
+            return;
+        }
 
         if (msg.type === 'hello') {
             logHADIN('ws', 'hello received backend=' + msg.backend + ' profiles=' + (msg.profiles || []).length);
@@ -311,6 +338,10 @@
     // the video applies, plus the optional mirror flip, so the stickman
     // always lines up with the body.
     function stageBox() {
+        if (!els.stage || !els.video) {
+            return { w: Math.max(1, els.overlay.clientWidth || 320),
+                     h: Math.max(1, els.overlay.clientHeight || 240) };
+        }
         const r = els.stage.getBoundingClientRect();
         return { w: Math.max(1, r.width), h: Math.max(1, r.height) };
     }
@@ -431,6 +462,8 @@
         front_kick: '🦵 Front Kick', roundhouse_kick: '🦵 Roundhouse Kick',
         knee_raise: '🦵 Knee Raise', block: '🛡️ Block', guard: '🧤 Guard',
         stance: '🧍 Stance',
+        superman_punch: '🦸 Superman Punch', spinning_backfist: '🌀 Spinning Backfist',
+        axe_kick: '🪓 Axe Kick', question_mark_kick: '❓ Question-Mark Kick',
     };
 
     function updateCoachMove(coach) {
@@ -807,7 +840,11 @@
             if (ev.target === summaryMask) closeSummary();   // click backdrop
         });
         document.addEventListener('keydown', (ev) => {
-            if (ev.key === 'Escape') closeSummary();
+            // Only Escape-closes when the modal is actually open — never kill
+            // a live session just because the user pressed Escape.
+            if (ev.key === 'Escape' && summaryMask.classList.contains('open')) {
+                closeSummary();
+            }
         });
     }
     // Expose so other pages (or inline handlers) can close it too.
@@ -853,8 +890,10 @@
                '👻 Ghost', '👻 Ghost');
     bindToggle('mirrorBtn', () => mirrorView, (v) => { mirrorView = v; },
                '🪞 Mirror', '🪞 Mirror');
-    bindToggle('voiceBtn', () => voiceOn, (v) => { voiceOn = v; },
-               '🔊 Voice', '🔇 Voice');
+    bindToggle('voiceBtn', () => voiceOn, (v) => {
+        voiceOn = v;
+        try { localStorage.setItem('hc.voice', v ? '1' : '0'); } catch (_) {}
+    }, '🔊 Voice', '🔇 Voice');
     // Prime the TTS engine on first user gesture (autoplay policies).
     document.addEventListener('click', () => {
         if ('speechSynthesis' in window) window.speechSynthesis.getVoices();

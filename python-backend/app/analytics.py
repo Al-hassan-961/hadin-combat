@@ -87,6 +87,8 @@ class FatigueTracker:
         """Feed a pose so stance alignment AND stance-width stability can be
         tracked over the session."""
         self._wobbles.append(stance_wobble(kps))
+        if len(self._wobbles) >= WARMUP_STRIKES and self._wobble_baseline is None:
+            self._wobble_baseline = sum(list(self._wobbles)) / len(self._wobbles)
         w = stance_width(kps)
         if w is not None:
             self._widths.append(w)
@@ -199,7 +201,15 @@ class FatigueTracker:
 # Post-session / post-analysis summary helpers
 # ---------------------------------------------------------------------------
 LANDED_QUALITY = 70        # a technique at/above this quality counts as "landed"
-LANDED_CONFIDENCE = 0.6    # ... and/or this detection confidence
+LANDED_CONFIDENCE = 0.8    # ... and/or this detection confidence
+
+
+def is_landed(quality: Optional[float], confidence: Optional[float]) -> bool:
+    """A single technique entry counts as 'landed' when its technique quality
+    is high OR its detection confidence is very high (clean + confident)."""
+    q = float(quality or 0)
+    c = float(confidence or 0)
+    return q >= LANDED_QUALITY or c >= LANDED_CONFIDENCE
 
 
 def most_used_technique(counts: Dict[str, int]) -> Optional[str]:
@@ -212,9 +222,13 @@ def most_used_technique(counts: Dict[str, int]) -> Optional[str]:
 def performance_score(accuracy: float, avg_quality: float,
                       tempo: float, final_fatigue: float) -> int:
     """0-100 overall performance from accuracy, quality, tempo and fatigue."""
-    acc = max(0.0, min(1.0, accuracy)) * 100
-    score = (0.45 * acc + 0.25 * avg_quality + 0.15 * min(100, tempo * 40)
-             + 0.15 * (100 - max(0, min(100, final_fatigue or 0))))
+    acc = max(0.0, min(1.0, accuracy or 0)) * 100
+    score = (0.45 * acc + 0.25 * (avg_quality or 0)
+             + 0.15 * min(100, tempo * 40)
+             + 0.15 * (100 - max(0, min(100, (final_fatigue or 0)))))
+    # A session with no landed output is not "15 for doing nothing".
+    if acc == 0 and not (avg_quality or tempo):
+        return 0
     return int(max(0, min(100, round(score))))
 
 
@@ -272,5 +286,6 @@ def build_session_summary(total_strikes: int = 0, landed: int = 0,
         "duration_s": round(duration_s),
         "fatigue_curve": [list(p) for p in (fatigue_curve or [])],
         "suggestions": improvement_suggestions(
-            most, accuracy, int(final_fatigue), reaction_s, total_strikes),
+            most, accuracy, int(final_fatigue) if final_fatigue is not None else 0,
+            reaction_s, total_strikes),
     }

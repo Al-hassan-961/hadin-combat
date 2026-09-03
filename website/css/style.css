@@ -515,7 +515,9 @@ body {
     font-size: 0.7rem;
     color: #001;
     font-weight: 700;
+    text-shadow: 0 0 6px rgba(255, 255, 255, 0.6);
 }
+html.light .progress-pct { color: #0b1220; text-shadow: none; }
 input[type="range"] {
     accent-color: var(--neon);
     margin-top: 6px;

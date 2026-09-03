@@ -35,6 +35,23 @@ STRIKE_TYPES = {"jab", "cross", "hook", "uppercut",
                 "superman_punch", "spinning_backfist",
                 "axe_kick", "question_mark_kick"}
 
+# Complex (multi-phase / acrobatic) techniques are strictly MORE SPECIFIC than
+# the basic strikes a naive limb detector would also fire on the same physical
+# motion (an axe kick also moves the ankle like a big front kick; a superman
+# punch extends both arms like a jab+cross). When a complex signature is
+# present in a window it is the authoritative label, so the basic strikes that
+# overlap the SAME event must be suppressed or one physical technique is
+# counted 2-4x (front_kick + axe_kick + front_kick...). See analyze().
+COMPLEX_TYPES = {"superman_punch", "spinning_backfist",
+                 "axe_kick", "question_mark_kick"}
+# Basic punches/kicks that overlap each complex type's kinematics.
+COMPLEX_OVERRIDES = {
+    "superman_punch": {"jab", "cross", "hook", "uppercut"},
+    "spinning_backfist": {"jab", "cross", "hook", "uppercut"},
+    "axe_kick": {"front_kick", "roundhouse_kick", "knee_raise"},
+    "question_mark_kick": {"front_kick", "roundhouse_kick", "knee_raise"},
+}
+
 # Per-technique professional advice (rotated per repetition).
 ADVICE: Dict[str, List[str]] = {
     "jab": [
@@ -216,8 +233,19 @@ class MovementAnalyzer:
         torso = _TorsoState.compute(frames)
         detections.extend(self._detect_arms(frames))
         detections.extend(self._detect_legs(frames))
-        detections.extend(self._detect_complex(frames, torso))
+        complex_dets = self._detect_complex(frames, torso)
+        detections.extend(complex_dets)
         detections.append(self._assess_stance(frames[-1]))
+        # A complex technique is the authoritative label for the motion that
+        # also trips a basic detector (axe kick looks like a big front kick,
+        # superman punch like a jab+cross). Suppress the overlapping basics so
+        # ONE physical technique is never counted twice in the same window.
+        suppress: set = set()
+        for cd in complex_dets:
+            suppress |= COMPLEX_OVERRIDES.get(cd.get("type"), set())
+        if suppress:
+            detections = [d for d in detections
+                          if d.get("type") not in suppress]
         return detections
 
     # ---- helpers ------------------------------------------------------------
@@ -433,15 +461,27 @@ class CoachEngine:
         advice: List[str] = []
         latest_strike: Optional[Dict[str, Any]] = None
 
+        # Dedupe overlapping types within a single call: one physical technique
+        # must contribute at most ONE count and ONE timestamp, or the reaction
+        # window gets polluted with 0.0 gaps (a duplicate now) and totals over-
+        # count. Prefer the highest-confidence detection of each distinct type.
+        by_type: Dict[str, Dict[str, Any]] = {}
         for d in detections:
+            t = d.get("type")
+            if t not in STRIKE_TYPES:
+                if d.get("advice"):
+                    advice.append(d["advice"][0])
+                continue
+            cur = by_type.get(t)
+            if cur is None or d.get("confidence", 0) > cur.get("confidence", 0):
+                by_type[t] = d
+
+        for d in by_type.values():
             t = d["type"]
-            if t in STRIKE_TYPES:
-                self.counts[t] = self.counts.get(t, 0) + 1
-                self.total_strikes += 1
-                self._strike_times.append(now)
-                latest_strike = d
-            elif d.get("advice"):
-                advice.append(d["advice"][0])
+            self.counts[t] = self.counts.get(t, 0) + 1
+            self.total_strikes += 1
+            self._strike_times.append(now)
+            latest_strike = d
 
         if latest_strike:
             self.last = latest_strike
