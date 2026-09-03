@@ -180,6 +180,17 @@ body {
     white-space: nowrap;
     color: #ffd166;
 }
+.hud-cam {
+    top: 50px;
+    left: 50%;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    background: rgba(180, 60, 20, 0.92);
+    color: #fff;
+    animation: camPulse 0.8s ease-in-out infinite alternate;
+    z-index: 6;
+}
+@keyframes camPulse { to { box-shadow: 0 0 18px rgba(255, 160, 60, 0.8); } }
 
 /* ---- Feedback ----------------------------------------------------------- */
 .feedback {

@@ -87,6 +87,9 @@
                     <div class="hud hud-top-left" id="hudFps">— fps</div>
                     <div class="hud hud-top-right" id="hudLatency">— ms</div>
                     <div class="hud hud-difficulty" id="hudDifficulty">Difficulty: 40%</div>
+                    <div class="hud hud-cam" id="camStable" role="status" hidden>
+                        📱 Hold the phone still
+                    </div>
                 </section>
 
                 <!-- LIVE ANALYSIS PANEL -->
@@ -176,9 +179,13 @@
                     <button id="mirrorBtn" class="btn btn-ghost">🪞 Mirror</button>
                     <button id="voiceBtn" class="btn btn-ghost">🔊 Voice</button>
                     <button id="calBtn" class="btn btn-ghost">🎯 Calibrate</button>
+                    <button id="stabilizeBtn" class="btn btn-ghost">📱 Hold still</button>
                 </nav>
                 <div class="connect-bar" role="status" id="calStatus" style="display:none">
                     🎯 Calibration: throw 5 clean punches…
+                </div>
+                <div class="connect-bar" role="status" id="stabilizeStatus" style="display:none">
+                    📱 Hold the phone still for ~2 seconds to enable detection…
                 </div>
 
                 <!-- Connection / share bar -->

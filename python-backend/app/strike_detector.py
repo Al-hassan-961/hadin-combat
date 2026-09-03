@@ -21,8 +21,10 @@ from .coach import COMPLEX_OVERRIDES, STRIKE_TYPES
 
 MIN_CONFIDENCE = 0.6        # 60% — only confident strikes are counted
 UNCERTAIN_LO = 0.35         # below this: noise, discarded entirely
-COOLDOWN_S = 0.35           # seconds between two accepted strikes
+COOLDOWN_S = 0.30           # 300ms debounce between two accepted strikes
 SAME_TYPE_WINDOW = 0.9      # same technique within this window = one strike
+DEFAULT_MIN_SPEED = 0.35    # default velocity floor (normalized disp/s) —
+                            # slow sway / phone drift never registers as a strike
 
 
 def _same_event(a: str, b: str) -> bool:
@@ -53,7 +55,7 @@ class StrikeGate:
 
     def __init__(self, min_conf: float = MIN_CONFIDENCE,
                  cooldown: float = COOLDOWN_S,
-                 min_speed: Optional[float] = None) -> None:
+                 min_speed: Optional[float] = DEFAULT_MIN_SPEED) -> None:
         self.min_conf = min_conf
         self.cooldown = cooldown
         self.min_speed = min_speed          # calibrated optional gate (per s)

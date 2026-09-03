@@ -33,6 +33,7 @@ from .analytics import (LANDED_CONFIDENCE, LANDED_QUALITY, FatigueTracker,
                         build_session_summary, is_landed)
 from .coach import (COMPLEX_TYPES, L_ANKLE, L_WRIST, R_ANKLE, R_WRIST,
                     CoachEngine, MovementAnalyzer)
+from .stability import CameraMotionDetector
 from .strike_detector import StrikeGate, UNCERTAIN_LO, confidence_state
 
 PoseFn = Callable[[Any], Optional[List[Dict[str, float]]]]
@@ -87,6 +88,9 @@ class FramePipeline:
         self.coach = CoachEngine()
         self.fatigue = FatigueTracker()
         self.gate = StrikeGate()
+        self.cam = CameraMotionDetector()
+        self.camera_stable = True
+        self.camera_unstable_sec = 0.0
         if calibration:
             self.gate.configure(min_conf=calibration.get("min_conf"),
                                 cooldown=calibration.get("cooldown"),
@@ -161,8 +165,41 @@ class FramePipeline:
             "state": confidence_state(float(candidate.get("confidence", 0))),
         })
 
+    def observe_camera(self, frame: Any, t_s: float) -> bool:
+        """Feed one RAW BGR frame to the camera-motion gate.
+
+        Returns True when the camera is stable (detections may be trusted).
+        While the camera is moving we do NOT accumulate pose/movement so a
+        shaky recording or a moving phone can never produce phantom strikes.
+        """
+        stable = self.cam.observe(frame)
+        if self.camera_stable and not stable:
+            # Camera just started moving -> drop any in-progress technique and
+            # clear buffers so stale motion can't commit after movement ends.
+            self._commit_abort()
+            self.movement.reset()
+            self._prev_pose = None
+        self.camera_stable = stable
+        if not stable:
+            self.camera_unstable_sec += 0.1
+        return stable
+
+    def _commit_abort(self) -> None:
+        """Discard an in-progress detection run without counting a strike."""
+        self._run = False
+        self._run_best = None
+        self._run_onset = None
+        self._run_last_det = -1.0
+
     def step(self, kps_px: Optional[List[Dict[str, float]]],
              w: int, h: int, t_s: float, sample_fps: float = TARGET_FPS) -> None:
+        # While the camera is moving, ignore the pose entirely (see observe_camera).
+        if not self.camera_stable:
+            if t_s - self._t_last_fatigue >= FATIGUE_SAMPLE_S:
+                self._t_last_fatigue = t_s
+                self.fatigue_curve.append([round(t_s, 2),
+                                           self.fatigue.score()["score"]])
+            return
         norm = _norm(kps_px, w, h) if kps_px else None
 
         # Instantaneous speed from wrist/ankle displacement.
@@ -274,6 +311,7 @@ def analyze_frames_iter(pose_fn: PoseFn, frames: Iterator[Any],
             kps = pose_fn(frame)
         except Exception:  # noqa: BLE001
             kps = None
+        pipe.observe_camera(frame, t)
         pipe.step(kps, w, h, t)
         t += step_s
         if progress_cb and total_hint:

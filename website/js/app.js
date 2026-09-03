@@ -203,6 +203,13 @@
             toast('Calibrated! min confidence ' + Math.round((t.min_conf || 0.6) * 100) +
                 '%, min speed ' + t.min_speed, '🎯');
         }
+        if (msg.type === 'stability_ack') {
+            const st = document.getElementById('stabilizeStatus');
+            if (st) st.style.display = msg.status === 'ready' ? 'none' : 'flex';
+            if (msg.status === 'ready') {
+                toast('Camera stable — detection enabled.', '📱');
+            }
+        }
         if (msg.type === 'match_summary') {
             showMatchSummary(msg);
         }
@@ -390,6 +397,7 @@
             }
         }
         if (msg.fatigue) updateFatigue(msg.fatigue);
+        updateCameraStable(msg.camera_stable !== false);
         if (msg.analysis) {
             try {
                 updateLivePanel(msg.analysis);
@@ -397,6 +405,21 @@
             } catch (err) {
                 console.error('[HADIN:ui] updateAnalysis error', err);
             }
+        }
+    }
+
+    // Camera / phone stability indicator. When the camera is moving the server
+    // stops sending detections, so we dim the skeleton and surface a prompt.
+    function updateCameraStable(stable) {
+        const badge = document.getElementById('camStable');
+        if (!badge) return;
+        const showMove = running && !stable;
+        badge.hidden = !showMove;
+        if (showMove) {
+            badge.textContent = '📱 Hold the phone still';
+            badge.classList.add('show');
+        } else {
+            badge.classList.remove('show');
         }
     }
 
@@ -867,29 +890,65 @@
             }
         });
     }
+    // Hold-the-phone-still calibration: ask the server whether the camera has
+    // been steady for ~2s; poll until it confirms, so detection is only trusted
+    // once the device isn't shaking.
+    els.stabilizeBtn = els.stabilizeBtn || document.getElementById('stabilizeBtn');
+    let stabilizeTimer = null;
+    function askStability() {
+        const st = document.getElementById('stabilizeStatus');
+        if (st) st.style.display = 'flex';
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'calibration', action: 'stability' }));
+        }
+    }
+    if (els.stabilizeBtn) {
+        els.stabilizeBtn.addEventListener('click', () => {
+            const st = document.getElementById('stabilizeStatus');
+            if (st) st.style.display = 'flex';
+            if (stabilizeTimer) clearInterval(stabilizeTimer);
+            askStability();
+            stabilizeTimer = setInterval(() => {
+                const badge = document.getElementById('stabilizeStatus');
+                const done = badge && badge.style.display === 'none';
+                if (done) { clearInterval(stabilizeTimer); stabilizeTimer = null; return; }
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'calibration', action: 'stability' }));
+                } else {
+                    clearInterval(stabilizeTimer); stabilizeTimer = null;
+                }
+            }, 1000);
+        });
+    }
 
     // ---- View toggles: skeleton / ghost / mirror ----------------------------
-    function bindToggle(id, get, set, onLabel, offLabel) {
+    function bindToggle(id, get, set, onLabel, offLabel, persistKey) {
         const btn = document.getElementById(id);
         if (!btn) return;
         const refresh = () => {
             const on = get();
             btn.textContent = on ? onLabel : offLabel;
             btn.classList.toggle('btn-active', on);
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false');
         };
         btn.addEventListener('click', () => {
-            set(!get());
+            const next = !get();
+            set(next);
+            if (persistKey) {
+                try { localStorage.setItem(persistKey, next ? '1' : '0'); } catch (_) {}
+            }
             if (id === 'mirrorBtn') applyViewTransforms();
             refresh();
         });
         refresh();
     }
+    // Skeleton overlay show/hide (the canvas stick-man over the camera).
     bindToggle('skeletonBtn', () => showSkeleton, (v) => { showSkeleton = v; },
-               '🦴 Skeleton', '🦴 Skeleton');
+               '🦴 Skeleton: ON', '🦴 Skeleton: OFF', 'hc.skeleton');
     bindToggle('ghostBtn', () => showOpponent, (v) => { showOpponent = v; },
-               '👻 Ghost', '👻 Ghost');
+               '👻 Ghost: ON', '👻 Ghost: OFF', 'hc.ghost');
     bindToggle('mirrorBtn', () => mirrorView, (v) => { mirrorView = v; },
-               '🪞 Mirror', '🪞 Mirror');
+               '🪞 Mirror: ON', '🪞 Mirror: OFF', 'hc.mirror');
     bindToggle('voiceBtn', () => voiceOn, (v) => {
         voiceOn = v;
         try { localStorage.setItem('hc.voice', v ? '1' : '0'); } catch (_) {}

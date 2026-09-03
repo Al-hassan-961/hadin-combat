@@ -44,6 +44,7 @@ from .camera_processor import (
     cv2_info,
     decode_jpeg_frame,
 )
+from .stability import CameraMotionDetector
 from .profiles import PROFILES, load_profile_preference
 from .strike_detector import StrikeGate, calibrate_thresholds
 from .engine import (
@@ -372,6 +373,8 @@ class SessionManager:
             "profile": _saved_profile(),
             "strike_gate": StrikeGate(),     # confident-strike gating
             "_cal": None,                    # live calibration state
+            "camera_stable": True,           # phone / camera ego-motion gate
+            "camera_det": CameraMotionDetector(),  # per-session stability gate
             # Post-session summary / live-panel accumulators.
             "quality_list": [],          # (quality, confidence) per landed strike
             "fatigue_progression": [],   # [elapsed_s, fatigue_score] samples
@@ -567,6 +570,41 @@ async def process_frame(websocket: WebSocket, client_id: str,
                         sess: Dict[str, Any], frame: np.ndarray) -> None:
     t0 = time.perf_counter()
     h, w = frame.shape[:2]
+
+    # ---- camera / phone ego-motion gate ------------------------------------
+    # If the phone is moving/rotating, the whole frame shifts and the pose
+    # backend (esp. the OpenCV motion fallback) would read that as athlete
+    # motion -> phantom kicks/hooks. Detect it on the raw frame and IGNORE
+    # detections while unstable.
+    cam_det = sess.setdefault("camera_det", CameraMotionDetector())
+    stable = cam_det.observe(frame)
+    was_stable = sess.get("camera_stable", True)
+    sess["camera_stable"] = stable
+    if was_stable and not stable:
+        # Camera just started moving: drop any in-progress technique/buffer so
+        # stale motion cannot commit once the camera settles.
+        sess["movement"].reset()
+        sess["_prev_norm"] = None
+        sess["strike_gate"].reset()
+
+    if not stable:
+        # Still send a lightweight analysis so the UI can show "hold still".
+        await websocket.send_json({
+            "type": "frame", "client_id": client_id,
+            "analysis": _camera_unstable_analysis(sess),
+            "keypoints": [], "opponent": [],
+            "feedback": {"grade": "C",
+                         "notes": ["📱 Hold the phone still — camera moving."],
+                         "score": 0},
+            "coach": sess["coach"].update([], now=time.time()),
+            "fatigue": sess["fatigue"].score(),
+            "difficulty": round(sess["difficulty"], 2),
+            "latency_ms": round((time.perf_counter() - t0) * 1000, 2),
+            "backend": ai_core.backend,
+            "camera_stable": False,
+        })
+        return
+
     kps = ai_core.pose_keypoints(frame)
 
     if kps:
@@ -742,6 +780,7 @@ async def process_frame(websocket: WebSocket, client_id: str,
         "difficulty": round(sess["difficulty"], 2),
         "latency_ms": round(latency_ms, 2),
         "backend": ai_core.backend,
+        "camera_stable": True,
     }
     # Debug aid: with HADIN_DEBUG=1 the server logs ~every 20th frame so you
     # can confirm analysis is being produced and sent (check uvicorn output).
@@ -750,6 +789,32 @@ async def process_frame(websocket: WebSocket, client_id: str,
                     sess["frames"], len(draw_kps),
                     analysis["fatigue_score"], analysis["speed_band"], ai_core.backend)
     await websocket.send_json(payload)
+
+
+def _camera_unstable_analysis(sess: Dict[str, Any]) -> Dict[str, Any]:
+    """Small analysis payload sent while the camera is moving, so the UI can
+    show a 'hold the phone still' prompt instead of trusting detections."""
+    cam_det = sess.setdefault("camera_det", CameraMotionDetector())
+    stable_ok = getattr(cam_det, "is_calibrated_still", lambda: False)()
+    try:
+        fatigue = sess["fatigue"].score()
+    except Exception:  # noqa: BLE001
+        fatigue = {"score": 0, "level": "fresh"}
+    return {
+        "strike": None,
+        "fatigue_score": fatigue["score"],
+        "fatigue_level": fatigue["level"],
+        "profile": PROFILES.get(sess["profile"], PROFILES["balanced"])["label"],
+        "elapsed_s": round(time.time() - sess.get("started", time.time()), 1),
+        "round": 1,
+        "phase": "round",
+        "phase_remain": 0,
+        "speed_band": "slow",
+        "tip": ("📱 Hold the phone still so I can read your technique."
+                if not stable_ok else "Hold still… calibrating."),
+        "action": "Camera moving — detections paused.",
+        "performance": None,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -828,8 +893,22 @@ async def handle_json(websocket: WebSocket, client_id: str, text: str) -> None:
         elif action == "reset" and sess:
             sess["strike_gate"].reset()
             sess["_cal"] = None
+            sess.setdefault("camera_det", CameraMotionDetector()).reset()
             await websocket.send_json(
                 {"type": "calibration_ack", "status": "reset"})
+        elif action == "stability" and sess:
+            # Hold-the-phone-still calibration: report once the camera has been
+            # steady long enough (used by the client to gate detection).
+            det = sess.setdefault("camera_det", CameraMotionDetector())
+            ready = det.is_calibrated_still()
+            await websocket.send_json({
+                "type": "stability_ack",
+                "status": "ready" if ready else "settling",
+                "still_frames": det.still_frames,
+                "required": CameraMotionDetector.STILL_CALIBRATION_FRAMES,
+                "message": ("Camera stable — detection enabled."
+                            if ready else "Hold the phone still…"),
+            })
     elif msg_type == "set_profile":
         from .profiles import PROFILE_NAMES, save_profile_preference
         name = str(data.get("profile", ""))
