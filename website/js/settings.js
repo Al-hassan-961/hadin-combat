@@ -46,13 +46,18 @@
     }
 
     async function backendInfo() {
+        const el = $('backendInfo');
         try {
             const r = await fetch('/api/stats');
             const d = await r.json();
-            $('backendInfo').textContent =
+            const p = d.profile || {};
+            const lvl = Math.round((p.progress_score || 0) * 100);
+            el.innerHTML =
                 'Backend: ' + (d.backend || '?') + ' · profiles: ' +
-                Object.keys(d.profiles || {}).length;
-        } catch (_) { $('backendInfo').textContent = 'Backend: unreachable'; }
+                Object.keys(d.profiles || {}).length + '<br>' +
+                'Co-evolution: <b>' + (p.total_sessions || 0) + '</b> sessions · ' +
+                'AI level <b>' + lvl + '%</b>';
+        } catch (_) { el.textContent = 'Backend: unreachable'; }
     }
 
     document.addEventListener('DOMContentLoaded', () => {

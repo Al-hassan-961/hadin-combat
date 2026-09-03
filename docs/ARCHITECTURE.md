@@ -95,38 +95,47 @@ processes frames asynchronously so the UI never blocks on a slow backend.
   coroutine; Starlette's event loop never blocks on I/O.
 - **ONNX Runtime** `IntraOpNumThreads = 2` bounds CPU contention inside the
   C++ core, keeping inference off the critical asyncio path per request.
-- **SessionManager** is an in-memory dict keyed by `client_id`. In production,
-  use **Redis** (already wired in `docker-compose`) to share session state
-  across uvicorn workers.
+- **SessionManager** is an in-memory dict keyed by `client_id`. History,
+  uploads and the athlete co-evolution profile persist to JSON under
+  `python-backend/data/` (no external service required). To share state across
+  uvicorn workers in production you can later add Redis; the app has no hard
+  dependency on it.
 - Model loading happens **once at startup** (`AICore`), not per request.
 
 ---
 
 ## 5. Fallback Mechanism (Graceful Degradation)
 
-The `AICore` class resolves the active backend in this order:
+`AICore` loads **every** importable backend at startup (C++ ONNX core, MediaPipe,
+OpenCV motion fallback), then picks the best one as the active backend. Because
+all fallbacks are already initialised, it can **degrade at runtime** — after
+enough errors or silent-empty results it steps down the chain without a reboot.
 
 ```mermaid
 flowchart LR
-    A[Start] --> B{USE_CPP_CORE?}
-    B -- no --> D{MediaPipe?\nimport available}
-    B -- yes --> C{import hadin_core\n&& pose.is_ready()}
-    C -- ok --> CPP[Backend = cpp]
-    C -- fail --> F{FALLBACK_TO_PYTHON?}
-    F -- no --> N[Backend = none]
-    F -- yes --> D
-    D -- yes --> MP[Backend = mediapipe]
-    D -- no --> O[Backend = opencv\nmotion fallback]
+    A[Startup] --> B[Load C++ core]
+    A --> D[Load MediaPipe]
+    A --> E[Load OpenCV motion]
+    B --> P[Pick best: cpp > mediapipe > opencv]
+    D --> P
+    E --> P
+    P --> RUN[Active backend runs]
+    RUN --> X[Error / empty streak]
+    X --> RUN
+    X --> R[Runtime degrade: cpp -> mediapipe -> opencv]
 ```
 
 - The **C++ core** is a pure accelerator. The **opponent, style and
   co-evolution** logic has a full pure-Python implementation in
-  `app/engine.py`, so those work even without C++ or ONNX models.
+  `app/engine.py` (publicly re-exported by `app/dna_encoder.py`,
+  `app/adaptive_opponent.py`, `app/coevolution.py`), so those work even
+  without C++ or ONNX models.
 - **Pose** resolves C++ → MediaPipe → OpenCV motion fallback → none. The
   OpenCV motion fallback synthesizes a crude skeleton so the app keeps
   producing keypoints and feedback on any device.
-- If the C++ library fails to build or load, `USE_CPP_CORE=false` is written
-  to `.env` by the quickstart script, and the server runs entirely on Python.
+- `pose_keypoints()` is thread-safe (internal lock) because the offline
+  video-analysis workers and the live WebSocket session share the same
+  backend instances.
 - The active backend is reported to the client in the `hello` message and via
   `GET /api/stats`, and surfaced as a colored pill in the UI.
 

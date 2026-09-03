@@ -14,7 +14,8 @@ const path = require('path');
 const vm = require('vm');
 
 const root = path.join(__dirname, '..');
-const targets = ['website/js/app.js', 'website/js/dashboard.js'];
+const targets = ['website/js/app.js', 'website/js/dashboard.js',
+    'website/js/settings.js'];
 
 const HEADER = 'HADIN-COMBAT';
 let failed = false;

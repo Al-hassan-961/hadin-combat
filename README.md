@@ -55,8 +55,8 @@ flowchart LR
 
 ## ✨ Features
 
-- 🧬 **Fighting DNA Extraction** — your movement style is encoded into a reusable latent fingerprint.
-- 🥊 **Adaptive Opponent** — the AI opponent adapts stance, tempo, and defense to counter you.
+- 🧬 **Fighting DNA Extraction** — your movement style is encoded into a reusable latent fingerprint (`app/dna_encoder.py`).
+- 🥊 **Adaptive Opponent** — the AI opponent adapts stance, tempo, and defense to counter you (`app/adaptive_opponent.py`).
 - 🧠 **AI Coach** — real-time martial-arts movement detection (jab, cross, hook, uppercut, front/roundhouse kicks, **superman punch, spinning backfist, axe kick, question-mark kick**, guard, stance) each with a confidence score, plus technique counters, quality scoring, tempo and rotating professional coaching advice (`app/coach.py`).
 - 😮‍💨 **Fatigue analysis** — real-time fatigue score 0–100 from strike-speed decay, reaction slowing and stance wobble, with recovery advice (`app/fatigue.py`).
 - 🤖 **Sparring AI profiles** — switch mid-session between Balanced / Aggressive / Counter-Puncher / Defensive / Pressure Fighter opponents (`app/profiles.py`).
@@ -65,7 +65,11 @@ flowchart LR
 - 🏆 **Match summary** — pressing Stop generates a full post-session report (strikes thrown/landed, accuracy %, most-used technique, reaction time, fatigue progression, performance score 0–100 and top-3 improvement tips).
 - 🎬 **Video upload & analysis** — upload an MP4/MOV/AVI sparring clip on the dashboard; it is analysed offline frame-by-frame with a progress bar, a clickable strike timeline, and the same analytics — all stored in Session History.
 - 🔊 **Voice coaching** — real-time verbal feedback via the browser's speech synthesis (optional toggle).
-- 🔄 **Co-Evolution** — both you and the AI improve session over session.
+- 🔄 **Co-Evolution** — the opponent difficulty and framing genuinely grow
+  with you: each finished session updates a persisted athlete profile
+  (`python-backend/data/athlete_profile.json`) that drives the next session's
+  difficulty (`app/coevolution.py`), so both you and the AI improve session
+  over session.
 - 📱 **Mobile-First** — thumb-friendly neon UI, works on any browser.
 - 🚀 **One-Command Setup** on Android (Termux) — no manual steps.
 - 📡 **Real-Time WebSockets** — sub-100ms latency for pose → movement → coach → opponent → feedback.
@@ -203,4 +207,4 @@ Released under the **MIT License**. Copyright (c) 2026 Al-hassan Shehade & Dina 
 | Core AI inference | C++17/20 · ONNX Runtime · pybind11 |
 | Backend | Python 3.10+ · Starlette (ASGI) · WebSockets · OpenCV · MediaPipe |
 | Frontend | HTML5 · CSS · JavaScript · Canvas · getUserMedia |
-| Deployment | Docker Compose · uvicorn · Redis |
+| Deployment | Docker Compose · uvicorn |

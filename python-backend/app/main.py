@@ -458,9 +458,16 @@ def _record_history(client_id: str, sess: Optional[Dict[str, Any]],
         return
     HISTORY.append(_compose_session_summary(client_id, sess, source, title))
     del HISTORY[:-MAX_HISTORY]
+    _recompute_athlete_profile()
 
-# In-memory athlete profile (persist to Redis in production).
-athlete_profile: Dict[str, Any] = {
+
+# ---------------------------------------------------------------------------
+# Athlete long-term profile for co-evolution (session-over-session growth).
+# Persisted to JSON so improvement survives restarts (no Redis dependency).
+# ---------------------------------------------------------------------------
+ATHLETE_PROFILE_FILE = BASE_DIR / "data" / "athlete_profile.json"
+
+_DEFAULT_ATHLETE = {
     "athlete_id": "local",
     "total_sessions": 0,
     "total_rounds": 0,
@@ -468,6 +475,62 @@ athlete_profile: Dict[str, Any] = {
     "avg_response_ms": 0.0,
     "progress_score": 0.0,
 }
+
+
+def _load_athlete_profile() -> Dict[str, Any]:
+    """Load the saved athlete profile, falling back to defaults."""
+    base = dict(_DEFAULT_ATHLETE)
+    try:
+        with open(ATHLETE_PROFILE_FILE, encoding="utf-8") as f:
+            saved = json.load(f)
+        for k in base:
+            if k in saved:
+                base[k] = saved[k]
+    except Exception:  # noqa: BLE001  (missing/corrupt file -> defaults)
+        pass
+    return base
+
+
+def _save_athlete_profile() -> None:
+    try:
+        ATHLETE_PROFILE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(ATHLETE_PROFILE_FILE, "w", encoding="utf-8") as f:
+            json.dump(athlete_profile, f, indent=2)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _recompute_athlete_profile() -> None:
+    """Re-derive the athlete profile from recent HISTORY after every session.
+
+    This is what makes the AI 'grow with you': as more sessions complete, the
+    co-evolution policy reads a higher total_sessions / progress_score and
+    nudges the opponent difficulty upward (see CoEvolutionPolicy.step).
+    """
+    n = len(HISTORY)
+    athlete_profile["total_sessions"] = n
+    athlete_profile["total_rounds"] = n          # one round per session, approx
+    if n == 0:
+        _save_athlete_profile()
+        return
+    total_strikes = sum(h.get("total_strikes", 0) or 0 for h in HISTORY)
+    total_landed = sum(h.get("landed", 0) or 0 for h in HISTORY)
+    avg_perf = sum(h.get("performance", 0) or 0 for h in HISTORY) / n
+    avg_fatigue = sum(h.get("final_fatigue", 0) or 0 for h in HISTORY) / n
+    react = [h.get("reaction_s") for h in HISTORY if h.get("reaction_s") is not None]
+    # win_rate proxy = clean-technique ratio across all sessions.
+    athlete_profile["win_rate"] = round(
+        (total_landed / total_strikes) if total_strikes else 0.5, 3)
+    # progress_score (0..1) = blended performance + conditioning headroom.
+    fatigue_penalty = max(0.0, min(1.0, avg_fatigue / 100.0))
+    athlete_profile["progress_score"] = round(
+        max(0.0, min(1.0, (avg_perf / 100.0) * (1.0 - 0.25 * fatigue_penalty))), 3)
+    athlete_profile["avg_response_ms"] = round(
+        (sum(react) / len(react)) * 1000.0, 1) if react else 0.0
+    _save_athlete_profile()
+
+
+athlete_profile: Dict[str, Any] = _load_athlete_profile()
 
 
 # ---------------------------------------------------------------------------
@@ -940,6 +1003,7 @@ async def api_analyze_status(request) -> JSONResponse:
         HISTORY.append(entry)
         del HISTORY[:-MAX_HISTORY]
         _archived_videos.add(job_id)
+        _recompute_athlete_profile()
         video_jobs.prune()
     return JSONResponse(job)
 
