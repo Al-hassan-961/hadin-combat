@@ -270,3 +270,34 @@ def test_camera_motion_pauses_detections():
         assert dbg.get("accepted") is not True, m
         if dbg.get("camera_stable") is False:
             assert dbg.get("reason") == "camera_moving"
+
+
+def test_ai_coach_toggle_and_payload(monkeypatch):
+    """Turning on the (simulated) AI coach must ack and add analysis['ai']."""
+    import app.main as m
+    from app.gemini_coach import GeminiCoach
+
+    sim = GeminiCoach(api_key=None, mode="simulate")
+    assert sim.enabled is True
+    monkeypatch.setattr(m, "ai_coach", sim)
+
+    # Enable via the WS control message, then send a frame.
+    sent = _run_endpoint([
+        {"text": json.dumps({"type": "ai_coach", "enabled": True})},
+        {"bytes": FRAME_BYTES},
+    ])
+    ack = next(x for x in sent if x["type"] == "ai_coach_ack")
+    assert ack["enabled"] is True
+    assert ack["available"] is True
+    assert ack["status"]["mode"] == "simulate"
+
+    frame = next(x for x in sent if x["type"] == "frame")
+    analysis = frame.get("analysis") or {}
+    assert analysis.get("ai_status", {}).get("enabled") is True
+    ai = analysis.get("ai")
+    # A verdict may be present once local strike state exists; assert structure
+    # if present (simulation yields one after feed_local sees a strike).
+    if ai is not None:
+        for f in ("strike_type", "confidence", "form_score",
+                  "feedback", "tactical_tip", "fatigue_level"):
+            assert f in ai

@@ -21,6 +21,7 @@ A raw JPEG byte payload is decoded to a frame and processed.
 | `set_profile` | `{"profile": "aggressive"}` | Switch the sparring-partner AI profile mid-session. |
 | `feedback_text` | `{"text": "..."}` | Echo a custom coaching message back. |
 | `debug` | `{"enabled": true}` | Toggle per-frame debug telemetry (see `debug_ack`). |
+| `ai_coach` | `{"enabled": true}` | Toggle the optional Gemini/simulated global-AI coach (see `ai_coach_ack`). |
 | `calibration` | `{"action": "start" \| "done" \| "reset"}` | Strike-calibration flow (collect 5 clean punches → personalise gate thresholds). |
 | `calibration` | `{"action": "stability"}` | Hold-phone-still check → `stability_ack` (`settling`/`ready`). |
 | `ping` | `{ "t": ... }` | Client replies `pong` so the server can reap dead sockets. |
@@ -191,6 +192,35 @@ decision (`accepted` + `reason`).
 { "type": "calibration_done", "thresholds": { "min_conf": 0.7,
   "min_speed": 0.5, "cooldown": 0.3 } }
 ```
+
+**`ai_coach_ack`** — after `{"type":"ai_coach","enabled":bool}`:
+```json
+{ "type": "ai_coach_ack", "enabled": true, "available": true,
+  "status": { "enabled": true, "mode": "live", "reason": "live",
+              "model": "gemini-2.0-flash-exp" },
+  "message": "AI coach on." }
+```
+
+**`hello.ai_coach`** — the initial `hello` message reports whether an AI coach
+is configured:
+```json
+{ "type": "hello", "backend": "opencv", "profiles": ["balanced"],
+  "ai_coach": { "enabled": true, "mode": "simulate", "reason": "simulation",
+                "model": "gemini-2.0-flash-exp" },
+  "message": "HADIN-COMBAT ready. Begin your session." }
+```
+
+**`analysis.ai`** — when the AI coach is enabled it rides in each frame's
+`analysis` object (the optional Gemini or simulated verdict):
+```json
+"ai": { "strike_type": "jab", "confidence": 87, "form_score": 78,
+        "feedback": "Great speed, but drop your shoulder less",
+        "tactical_tip": "Follow up with a cross",
+        "fatigue_level": 35, "provider": "gemini" },
+"ai_status": { "enabled": true, "mode": "live", "provider": "gemini" }
+```
+`ai` is `null` when there is no clear technique or the coach is unavailable;
+`ai_status.enabled` reflects whether the coach responded this frame.
 
 ---
 

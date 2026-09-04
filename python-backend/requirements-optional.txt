@@ -9,3 +9,7 @@
 #   pip install -r python-backend/requirements-optional.txt   (ignore errors)
 # ---------------------------------------------------------------------------
 mediapipe==0.10.14
+
+# Optional Google Gemini global-AI coach (app/gemini_coach.py). Pure-Python.
+# Install with:  pip install -r python-backend/requirements-optional.txt
+google-genai>=1.0

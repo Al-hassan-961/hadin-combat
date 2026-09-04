@@ -46,6 +46,7 @@ from .camera_processor import (
 )
 from .stability import CameraMotionDetector
 from .profiles import PROFILES, load_profile_preference
+from .gemini_coach import GeminiCoach, get_coach
 from .strike_detector import (StrikeGate, calibrate_thresholds,
                               confidence_state)
 from .engine import (
@@ -354,6 +355,10 @@ ai_core._coev_py = PurePythonCoEvolution()
 video_jobs = VideoJobManager(ai_core.pose_keypoints)
 UPLOAD_DIR = BASE_DIR / "data" / "uploads"
 
+# Optional Google Gemini global-AI coach. Disabled by default; enable by
+# setting GEMINI_API_KEY (live) or GEMINI_COACH_MODE=simulate (local demo).
+ai_coach = get_coach()
+
 # Live "rounds" for the timer HUD.
 ROUND_SECONDS = 180     # 3-minute rounds
 REST_SECONDS = 60       # 1-minute rest between rounds
@@ -396,6 +401,8 @@ class SessionManager:
             "camera_det": CameraMotionDetector(),  # per-session stability gate
             "_debug": bool(os.getenv("HADIN_DEBUG")),  # per-session debug toggle
             "_dbg": {},                      # per-frame debug telemetry
+            "ai_coach_on": False,            # Gemini coaching enabled for session
+            "_ai_last": 0.0,                 # throttle clock for Gemini calls
             # Post-session summary / live-panel accumulators.
             "quality_list": [],          # (quality, confidence) per landed strike
             "fatigue_progression": [],   # [elapsed_s, fatigue_score] samples
@@ -836,6 +843,29 @@ async def process_frame(websocket: WebSocket, client_id: str,
     except Exception:  # noqa: BLE001
         live_perf = 0
 
+    # ---- Optional Gemini global-AI coaching (throttled) --------------------
+    # If the client turned it on and a coach is available, ask Gemini (or the
+    # simulator) for a structured verdict on this frame. Throttled server-side
+    # to keep cost/latency sane; the verdict rides in analysis["ai"].
+    ai_verdict = None
+    ai_status = {"enabled": False, "reason": ai_coach.status.get("reason", "")}
+    if sess.get("ai_coach_on") and ai_coach.enabled:
+        _now_ms = time.time() * 1000.0
+        if _now_ms - sess.get("_ai_last", 0.0) >= 1000.0:   # 1/s max
+            sess["_ai_last"] = _now_ms
+            try:
+                ai_verdict = await ai_coach.analyze_frame(
+                    frame, last_strike=latest, fatigue_score=fatigue["score"])
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("AI coach error: %s", exc)
+                ai_verdict = None
+        else:
+            ai_verdict = ai_coach.latest()
+        if ai_verdict:
+            ai_status = {"enabled": True,
+                         "mode": ai_coach.mode,
+                         "provider": ai_verdict.get("provider", "gemini")}
+
     analysis = {
         "strike": strike,
         "fatigue_score": fatigue["score"],
@@ -849,6 +879,8 @@ async def process_frame(websocket: WebSocket, client_id: str,
         "tip": tip,
         "action": action,
         "performance": live_perf,
+        "ai": ai_verdict,                # Gemini / simulated verdict, or None
+        "ai_status": ai_status,          # capability + provider info
     }
 
     # NOTE: no debug frame is sent back — the browser draws the overlays on
@@ -1024,6 +1056,20 @@ async def handle_json(websocket: WebSocket, client_id: str, text: str) -> None:
                                            "min_speed": sess["strike_gate"].min_speed,
                                            "cooldown_s": sess["strike_gate"].cooldown,
                                        }})
+    elif msg_type == "ai_coach":
+        # Toggle the optional Gemini / simulated global-AI coach for this session.
+        if sess:
+            on = bool(data.get("enabled", False))
+            sess["ai_coach_on"] = on
+            await websocket.send_json({
+                "type": "ai_coach_ack",
+                "enabled": on,
+                "available": ai_coach.enabled,
+                "status": ai_coach.status,
+                "message": ("AI coach on." if on and ai_coach.enabled
+                            else "AI coach unavailable: " +
+                            ai_coach.status.get("reason", "")),
+            })
     elif msg_type == "set_profile":
         from .profiles import PROFILE_NAMES, save_profile_preference
         name = str(data.get("profile", ""))
@@ -1224,6 +1270,7 @@ async def ws_endpoint(websocket: WebSocket, **kwargs: Any) -> None:
             "backend": ai_core.backend,
             "profile": sess["profile"],
             "profiles": list(PROFILES.keys()),
+            "ai_coach": ai_coach.status,   # capability info for the UI toggle
             "message": "HADIN-COMBAT ready. Begin your session.",
         })
 

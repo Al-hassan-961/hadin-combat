@@ -93,6 +93,7 @@ def extras_require() -> dict:
         # Desktop convenience: system-class deps via wheels (never on Termux).
         "native": ["numpy>=1.24", "opencv-python>=4.8"],
         "mediapipe": ["mediapipe>=0.10"],
+        "gemini": ["google-genai>=1.0"],
         "dev": ["pytest", "httpx", "ruff"],
     }
 

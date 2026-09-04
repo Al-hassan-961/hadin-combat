@@ -134,6 +134,33 @@ See `python-backend/.env.example`. Key variables:
 | `REDIS_URL` | `redis://127.0.0.1:6379/0` | Optional Redis for shared sessions. |
 | `POSE_MODEL_PATH` | `models/pose.onnx` | Pose ONNX model path. |
 | `HOST` / `PORT` | `0.0.0.0` / `8000` | Server bind address/port. |
+| `GEMINI_COACH_MODE` | *(empty)* | `live` (real Gemini) or `simulate` (local demo). Empty = disabled. |
+| `GEMINI_API_KEY` | *(empty)* | Google AI Studio key for live Gemini coaching. |
+| `GEMINI_MODEL` | `gemini-2.0-flash-exp` | Gemini model used for live coaching. |
+
+### Enabling the optional Gemini global-AI coach
+
+The coach is **off by default** and the app works fully without it (local coach
+only). To enable **live** Gemini coaching:
+
+```bash
+pip install -r python-backend/requirements-optional.txt   # adds google-genai
+# then set in python-backend/.env:
+#   GEMINI_COACH_MODE=live
+#   GEMINI_API_KEY=<your Google AI Studio key>
+#   GEMINI_MODEL=gemini-2.0-flash-exp
+```
+
+To demo the AI-coach UI/pipeline **without a key or network** (clearly labelled
+as simulated):
+
+```bash
+# python-backend/.env:
+#   GEMINI_COACH_MODE=simulate
+```
+
+On the training page, enable it with the **🤖 AI Coach** toggle. When no coach
+is available the button is disabled and the local coach continues as normal.
 
 ---
 
