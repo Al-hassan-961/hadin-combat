@@ -21,7 +21,7 @@ A raw JPEG byte payload is decoded to a frame and processed.
 | `set_profile` | `{"profile": "aggressive"}` | Switch the sparring-partner AI profile mid-session. |
 | `feedback_text` | `{"text": "..."}` | Echo a custom coaching message back. |
 | `debug` | `{"enabled": true}` | Toggle per-frame debug telemetry (see `debug_ack`). |
-| `ai_coach` | `{"enabled": true}` | Toggle the optional Gemini/simulated global-AI coach (see `ai_coach_ack`). |
+| `ai_coach` | `{"enabled": bool}` | Optional internal opt-out for the auto-activated silent AI coach (see `ai_coach_ack`). Not needed normally — it is on by default when available. |
 | `calibration` | `{"action": "start" \| "done" \| "reset"}` | Strike-calibration flow (collect 5 clean punches → personalise gate thresholds). |
 | `calibration` | `{"action": "stability"}` | Hold-phone-still check → `stability_ack` (`settling`/`ready`). |
 | `ping` | `{ "t": ... }` | Client replies `pong` so the server can reap dead sockets. |
@@ -193,34 +193,35 @@ decision (`accepted` + `reason`).
   "min_speed": 0.5, "cooldown": 0.3 } }
 ```
 
-**`ai_coach_ack`** — after `{"type":"ai_coach","enabled":bool}`:
+**`ai_coach_ack`** — after the optional internal opt-out message
+`{"type":"ai_coach","enabled":bool}`. It is neutral (never names a provider):
 ```json
 { "type": "ai_coach_ack", "enabled": true, "available": true,
-  "status": { "enabled": true, "mode": "live", "reason": "live",
-              "model": "gemini-2.0-flash-exp" },
-  "message": "AI coach on." }
+  "message": "AI coaching on." }
 ```
 
-**`hello.ai_coach`** — the initial `hello` message reports whether an AI coach
-is configured:
+**`hello.ai_available`** — the initial `hello` message reports whether the
+auto-activated AI coach is ready for this session (a plain boolean, no
+provider name):
 ```json
 { "type": "hello", "backend": "opencv", "profiles": ["balanced"],
-  "ai_coach": { "enabled": true, "mode": "simulate", "reason": "simulation",
-                "model": "gemini-2.0-flash-exp" },
+  "ai_available": true,
   "message": "HADIN-COMBAT ready. Begin your session." }
 ```
 
-**`analysis.ai`** — when the AI coach is enabled it rides in each frame's
-`analysis` object (the optional Gemini or simulated verdict):
+**`analysis.ai`** — when the silent AI coach is active it rides in each frame's
+`analysis` object as a structured verdict:
 ```json
 "ai": { "strike_type": "jab", "confidence": 87, "form_score": 78,
         "feedback": "Great speed, but drop your shoulder less",
         "tactical_tip": "Follow up with a cross",
-        "fatigue_level": 35, "provider": "gemini" },
-"ai_status": { "enabled": true, "mode": "live", "provider": "gemini" }
+        "fatigue_level": 35 },
+"ai_status": { "enabled": true }
 ```
 `ai` is `null` when there is no clear technique or the coach is unavailable;
-`ai_status.enabled` reflects whether the coach responded this frame.
+`ai_status.enabled` reflects whether the coach responded this frame. The client
+folds the `feedback`/`tactical_tip` text into the normal coaching tips and never
+surfaces the provider.
 
 ---
 

@@ -273,13 +273,14 @@ def test_camera_motion_pauses_detections():
 
 
 def test_ai_coach_toggle_and_payload(monkeypatch):
-    """Turning on the (simulated) AI coach must ack and add analysis['ai']."""
+    """AI coach (simulated) adds analysis['ai']; ack is neutral (no provider)."""
     import app.main as m
-    from app.gemini_coach import GeminiCoach
+    from app.gemini_free import SilentCoach
 
-    sim = GeminiCoach(api_key=None, mode="simulate")
+    sim = SilentCoach(api_key=None, mode="simulate")
     assert sim.enabled is True
     monkeypatch.setattr(m, "ai_coach", sim)
+    monkeypatch.setattr(m, "AI_COACH_AVAILABLE", True)
 
     # Enable via the WS control message, then send a frame.
     sent = _run_endpoint([
@@ -289,7 +290,8 @@ def test_ai_coach_toggle_and_payload(monkeypatch):
     ack = next(x for x in sent if x["type"] == "ai_coach_ack")
     assert ack["enabled"] is True
     assert ack["available"] is True
-    assert ack["status"]["mode"] == "simulate"
+    # Neutral message must NOT leak a provider name.
+    assert "gemini" not in (ack.get("message") or "").lower()
 
     frame = next(x for x in sent if x["type"] == "frame")
     analysis = frame.get("analysis") or {}
@@ -301,3 +303,26 @@ def test_ai_coach_toggle_and_payload(monkeypatch):
         for f in ("strike_type", "confidence", "form_score",
                   "feedback", "tactical_tip", "fatigue_level"):
             assert f in ai
+        # No provider string may ride in the analysis payload shown to the UI.
+        blob = json.dumps(frame)
+        assert "gemini" not in blob.lower()
+
+
+def test_ai_coach_auto_activates_without_toggle(monkeypatch):
+    """When an AI coach is available, a session auto-uses it — no user toggle."""
+    import app.main as m
+    from app.gemini_free import SilentCoach
+
+    sim = SilentCoach(api_key=None, mode="simulate")
+    assert sim.enabled is True
+    monkeypatch.setattr(m, "ai_coach", sim)
+    monkeypatch.setattr(m, "AI_COACH_AVAILABLE", True)
+
+    # Connect and send a frame with NO ai_coach control message.
+    sent = _run_endpoint([{"bytes": FRAME_BYTES}])
+    hello = next(x for x in sent if x["type"] == "hello")
+    # hello reports availability as a plain boolean (no provider name).
+    assert hello.get("ai_available") is True
+    assert "gemini" not in json.dumps(hello).lower()
+    frame = next(x for x in sent if x["type"] == "frame")
+    assert (frame.get("analysis") or {}).get("ai_status", {}).get("enabled") is True

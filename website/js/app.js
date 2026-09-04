@@ -47,9 +47,7 @@
     let fpsWindowStart = 0;
     let reconnectDelay = 800;
     let voiceOn = false;
-    let aiAvailable = false;    // Gemini coach enabled on the server
-    let aiEnabled = false;      // user toggled it on this session
-    let aiProviderLabel = '';   // 'live' | 'simulate' | ''
+    let aiAvailable = false;    // optional auto-activated global-AI coach ready
     let lastSpoken = '';
     let lastTechniqueType = null;
     let tipLastShown = 0;
@@ -167,9 +165,7 @@
             setPill(msg.backend, msg.backend);
             addFeedback(msg.message);
             if (msg.profiles) initProfileChips(msg.profiles);
-            aiAvailable = !!(msg.ai_coach && msg.ai_coach.enabled);
-            aiProviderLabel = (msg.ai_coach && msg.ai_coach.mode) || '';
-            updateAiToggle();
+            aiAvailable = !!msg.ai_available;   // neutral, auto-activated server-side
             return;
         }
         if (msg.type === 'frame') {
@@ -219,11 +215,8 @@
                 ' cooldown=' + ((msg.gate && msg.gate.cooldown_s) || '?'));
         }
         if (msg.type === 'ai_coach_ack') {
-            aiEnabled = !!msg.enabled;
-            updateAiToggle();
-            if (msg.enabled) {
-                toast('Gemini AI coach on', '🧠');
-            }
+            // Optional server-side opt-out only; nothing shown to the user.
+            aiAvailable = !!msg.available;
         }
         if (msg.type === 'stability_ack') {
             const st = document.getElementById('stabilizeStatus');
@@ -424,8 +417,7 @@
             try {
                 updateLivePanel(msg.analysis);
                 updateAnalysis(msg.analysis, msg.coach);   // canonical ids
-                renderGeminiVerdict(msg.analysis.ai || null,
-                    msg.analysis.ai_status || null);
+                applyAiFeedback(msg.analysis);             // silent enrich
             } catch (err) {
                 console.error('[HADIN:ui] updateAnalysis error', err);
             }
@@ -620,59 +612,34 @@
             (index != null ? index + '/' + (required || 5) : '') + '</span>' + rows;
     }
 
-    // ---- Gemini global-AI coach panel --------------------------------------
-    function renderGeminiVerdict(ai, status) {
-        const panel = document.getElementById('geminiPanel');
-        if (!panel) return;
-        // Only show while the user enabled AI and a coach is active.
-        const active = aiEnabled && aiAvailable;
-        panel.hidden = !active;
-        if (!active) return;
-        const g = (id) => document.getElementById(id);
-        const provider = (ai && ai.provider) || (status && status.mode) ||
-            aiProviderLabel;
-        if (g('geminiProvider')) g('geminiProvider').textContent = provider === 'simulated'
-            ? 'simulation' : provider || '?';
-        const note = g('aiNote');
-        if (!ai || !ai.strike_type) {
-            g('aiStrike').textContent = '—';
-            if (g('aiStrikeMeta')) g('aiStrikeMeta').textContent = '';
-            g('aiFormScore').textContent = '—';
-            g('aiConfidence').textContent = '—';
-            g('aiFatigue').textContent = '—';
-            g('aiFeedback').textContent = '—';
-            g('aiTactical').textContent = '—';
-            if (note) {
-                note.textContent = status && status.enabled === false
-                    ? 'AI coach unavailable. Set GEMINI_API_KEY (or GEMINI_COACH_MODE=simulate) and restart.'
-                    : 'Waiting for a clear technique…';
+    // ---- Silent AI enrichment ----------------------------------------------
+    // When the (optional, auto-activated) global-AI coach returns a verdict it
+    // is folded invisibly into the existing coaching feedback. Nothing in the
+    // UI ever names the provider — it just improves the tips shown. If it is
+    // unavailable this is a complete no-op and local coaching continues.
+    let _lastAiText = '';
+    function applyAiFeedback(analysis) {
+        if (!analysis || !aiAvailable) return;
+        const ai = analysis.ai || null;
+        const fbEl = document.getElementById('feedbackList');
+        // Combine form cue + tactical tip into one coaching line.
+        const parts = [];
+        if (ai && ai.feedback) parts.push(ai.feedback);
+        if (ai && ai.tactical_tip) parts.push(ai.tactical_tip);
+        if (!parts.length) return;
+        const line = '💡 ' + parts.join(' — ');
+        // Avoid spamming the same line frame after frame.
+        if (line === _lastAiText) return;
+        _lastAiText = line;
+        if (fbEl) {
+            const li = document.createElement('li');
+            li.textContent = line;
+            fbEl.prepend(li);
+            while (fbEl.children.length > 4) {
+                fbEl.removeChild(fbEl.lastChild);
             }
-            return;
         }
-        const label = MOVE_LABELS[ai.strike_type] ||
-            (ai.strike_type || '').replace(/_/g, ' ') || '—';
-        if (g('aiStrike')) g('aiStrike').textContent = label;
-        if (g('aiStrikeMeta')) {
-            g('aiStrikeMeta').textContent = (ai.confidence != null ? ai.confidence + '%' : '');
-        }
-        if (g('aiFormScore')) g('aiFormScore').textContent = ai.form_score + '%';
-        if (g('aiConfidence')) g('aiConfidence').textContent = ai.confidence + '%';
-        if (g('aiFatigue')) g('aiFatigue').textContent = ai.fatigue_level;
-        if (g('aiFeedback')) g('aiFeedback').textContent = ai.feedback || '—';
-        if (g('aiTactical')) g('aiTactical').textContent = ai.tactical_tip || '—';
-        if (note) note.textContent = '';
-        if (debugMode) logHADIN('ai', JSON.stringify(ai));
-    }
-
-    function updateAiToggle() {
-        const btn = document.getElementById('aiBtn');
-        if (!btn) return;
-        btn.disabled = !aiAvailable;
-        btn.classList.toggle('btn-active', aiEnabled);
-        btn.textContent = aiEnabled ? '🧠 AI Coach: ON' : '🤖 AI Coach';
-        if (!aiAvailable) {
-            btn.title = 'AI coach unavailable — set GEMINI_API_KEY';
-        }
+        if (debugMode) logHADIN('ai', 'coach line: ' + line);
     }
 
     function fmtClock(sec) {
@@ -1083,32 +1050,6 @@
     if (debugMode && ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'debug', enabled: true }));
     }
-
-    // ---- Gemini AI coach toggle ----------------------------------------------
-    els.aiBtn = els.aiBtn || document.getElementById('aiBtn');
-    function toggleAi() {
-        if (!aiAvailable) {
-            toast('AI coach unavailable — set GEMINI_API_KEY on the server', '🧠');
-            return;
-        }
-        aiEnabled = !aiEnabled;
-        updateAiToggle();
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'ai_coach', enabled: aiEnabled }));
-        }
-        const panel = document.getElementById('geminiPanel');
-        if (panel) {
-            panel.hidden = !aiEnabled;
-            if (aiEnabled && !aiAvailable) {
-                const note = document.getElementById('aiNote');
-                if (note) note.textContent = 'AI coach unavailable on this server.';
-            }
-        }
-    }
-    if (els.aiBtn) {
-        els.aiBtn.addEventListener('click', toggleAi);
-    }
-    updateAiToggle();   // reflects hello capability (aiAvailable=false until hello)
 
     // ---- View toggles: skeleton / ghost / mirror ----------------------------
     function bindToggle(id, get, set, onLabel, offLabel, persistKey) {

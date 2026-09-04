@@ -166,28 +166,6 @@
                     <ul class="feedback-list" id="feedbackList"></ul>
                 </section>
 
-                <!-- GEMINI AI COACH PANEL (optional, hidden until enabled) -->
-                <section class="feedback gemini-panel" id="geminiPanel" aria-label="Gemini AI coach" hidden>
-                    <div class="feedback-head">
-                        <h2>🧠 Gemini AI Coach</h2>
-                        <span class="gemini-provider" id="geminiProvider">—</span>
-                    </div>
-                    <div class="gemini-strike">
-                        <span class="coach-move-name" id="aiStrike">—</span>
-                        <span class="coach-move-q" id="aiStrikeMeta"></span>
-                        <span class="gemini-scores">
-                            <span class="gemini-score">Form <b id="aiFormScore">—</b></span>
-                            <span class="gemini-score">Conf <b id="aiConfidence">—</b></span>
-                            <span class="gemini-score">Fatigue <b id="aiFatigue">—</b></span>
-                        </span>
-                    </div>
-                    <div class="gemini-lines">
-                        <div class="gemini-line"><span class="gemini-k">💬</span><span id="aiFeedback">—</span></div>
-                        <div class="gemini-line"><span class="gemini-k">🎯</span><span id="aiTactical">—</span></div>
-                    </div>
-                    <div class="gemini-note" id="aiNote">Not available. Set GEMINI_API_KEY to enable live Gemini coaching.</div>
-                </section>
-
                 <!-- Controls -->
                 <nav class="controls" aria-label="Session controls">
                     <button id="startBtn" class="btn btn-primary">▶ Start</button>
@@ -203,7 +181,6 @@
                     <button id="calBtn" class="btn btn-ghost">🎯 Calibrate</button>
                     <button id="stabilizeBtn" class="btn btn-ghost">📱 Hold still</button>
                     <button id="debugBtn" class="btn btn-ghost" title="Toggle debug logging">🐞 Debug</button>
-                    <button id="aiBtn" class="btn btn-ghost" title="Toggle Gemini global-AI coach" disabled>🤖 AI Coach</button>
                 </nav>
                 <div class="connect-bar" role="status" id="calStatus" style="display:none">
                     🎯 Calibration: throw 5 clean punches…

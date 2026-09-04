@@ -134,33 +134,34 @@ See `python-backend/.env.example`. Key variables:
 | `REDIS_URL` | `redis://127.0.0.1:6379/0` | Optional Redis for shared sessions. |
 | `POSE_MODEL_PATH` | `models/pose.onnx` | Pose ONNX model path. |
 | `HOST` / `PORT` | `0.0.0.0` / `8000` | Server bind address/port. |
-| `GEMINI_COACH_MODE` | *(empty)* | `live` (real Gemini) or `simulate` (local demo). Empty = disabled. |
-| `GEMINI_API_KEY` | *(empty)* | Google AI Studio key for live Gemini coaching. |
-| `GEMINI_MODEL` | `gemini-2.0-flash-exp` | Gemini model used for live coaching. |
+| `GEMINI_API_KEY` | *(empty)* | Official Google free-tier API key (auto-activates silent AI coach). |
+| `GEMINI_MODEL` | `gemini-2.0-flash-exp` | Model used by the silent AI coach. |
+| `AI_COACH_MODE` | *(empty)* | `simulate` runs a local no-network demo. Leave empty otherwise. |
 
-### Enabling the optional Gemini global-AI coach
+### Enabling the optional silent global-AI coach
 
-The coach is **off by default** and the app works fully without it (local coach
-only). To enable **live** Gemini coaching:
+The coach is **off by default** and the app works fully without it (local ML
+coach only). It **auto-activates in the background** when a key is present —
+no popups and no user interaction, and it **never shows a provider name in the
+UI**. If it is unavailable it silently falls back to the local coach.
 
 ```bash
-pip install -r python-backend/requirements-optional.txt   # adds google-genai
+bash scripts/prepare_ai_coach.sh                 # optional: installs google-genai, checks key
 # then set in python-backend/.env:
-#   GEMINI_COACH_MODE=live
-#   GEMINI_API_KEY=<your Google AI Studio key>
+#   GEMINI_API_KEY=<your free Google AI Studio key>   # https://aistudio.google.com/apikey
 #   GEMINI_MODEL=gemini-2.0-flash-exp
 ```
 
-To demo the AI-coach UI/pipeline **without a key or network** (clearly labelled
-as simulated):
+To run a local, network-free demo of the AI-coach path:
 
 ```bash
 # python-backend/.env:
-#   GEMINI_COACH_MODE=simulate
+#   AI_COACH_MODE=simulate
 ```
 
-On the training page, enable it with the **🤖 AI Coach** toggle. When no coach
-is available the button is disabled and the local coach continues as normal.
+Because it is invisible, there is nothing to click in the UI — richer coaching
+tips simply appear when the coach is active. `run.sh` runs the preflight
+script automatically (best-effort) before starting the server.
 
 ---
 

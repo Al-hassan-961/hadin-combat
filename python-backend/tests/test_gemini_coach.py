@@ -13,19 +13,28 @@ from unittest import mock
 
 import pytest
 
-from app.gemini_coach import (GeminiCoach, _coerce_verdict,
-                              extract_verdict_from_tool_call)
+# Canonical silent coach (app/gemini_free.py). gemini_coach is a compat alias.
+from app.gemini_free import (SilentCoach as Coach,
+                             _coerce_verdict,
+                             extract_verdict_from_tool_call)
 
 
 def _unset_gemini_env():
     os.environ.pop("GEMINI_API_KEY", None)
     os.environ.pop("GEMINI_MODEL", None)
     os.environ.pop("GEMINI_COACH_MODE", None)
+    os.environ.pop("AI_COACH_MODE", None)
+
+
+def test_gemini_coach_alias_matches_canonical():
+    from app.gemini_free import SilentCoach
+    from app.gemini_coach import GeminiCoach
+    assert GeminiCoach is SilentCoach
 
 
 def test_disabled_without_key():
     _unset_gemini_env()
-    c = GeminiCoach(api_key=None)
+    c = Coach(api_key=None)
     assert c.enabled is False
     assert asyncio.run(c.analyze_frame(None)) is None
     assert c.latest() is None
@@ -33,14 +42,13 @@ def test_disabled_without_key():
 
 def test_simulate_mode_produces_structured_verdict():
     _unset_gemini_env()
-    os.environ["GEMINI_COACH_MODE"] = "simulate"
-    c = GeminiCoach()
+    os.environ["AI_COACH_MODE"] = "simulate"
+    c = Coach()
     assert c.enabled is True and c.mode == "simulate"
     c.feed_local({"type": "hook", "quality": 88, "confidence": 0.8}, fatigue_score=40)
     v = asyncio.run(c.analyze_frame(None, fatigue_score=40))
     assert v is not None
     assert v["strike_type"] == "hook"
-    assert v["provider"] == "simulated"     # never mistaken for real AI
     for f in ("confidence", "form_score", "fatigue_level"):
         assert 0 <= v[f] <= 100
     assert isinstance(v["feedback"], str)
@@ -50,7 +58,7 @@ def test_simulate_mode_produces_structured_verdict():
 def test_live_mode_needs_sdk_or_key():
     _unset_gemini_env()
     # No key -> live not initialised, disabled.
-    c = GeminiCoach(api_key=None, mode="live")
+    c = Coach(api_key=None, mode="live")
     assert c.enabled is False
     assert "GEMINI_API_KEY" in c.status["reason"] or c.status["reason"]
 

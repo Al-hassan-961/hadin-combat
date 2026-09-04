@@ -137,6 +137,12 @@ LOCAL_URL="${SCHEME}://127.0.0.1:${PORT}"
 # ---------- system deps check (Termux) ---------------------------------------------
 ensure_termux_system_deps
 
+# ---------- optional silent AI-coach preflight (best-effort, never blocks) ----------
+# Auto-activates the global-AI coach if google-genai + GEMINI_API_KEY are ready;
+# silently falls back to the local ML coach otherwise. Failures are ignored.
+[ -f "$ROOT/scripts/prepare_ai_coach.sh" ] && \
+    bash "$ROOT/scripts/prepare_ai_coach.sh" >/dev/null 2>&1 || true
+
 # ---------- banner ----------------------------------------------------------------
 clear 2>/dev/null || true
 echo -e "${C_BOLD}${C_GREEN}"
