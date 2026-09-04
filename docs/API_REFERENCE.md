@@ -20,6 +20,10 @@ A raw JPEG byte payload is decoded to a frame and processed.
 | `reset` | `{}` | Reset difficulty to `0.4`, clear frame counter, coach & fatigue state. |
 | `set_profile` | `{"profile": "aggressive"}` | Switch the sparring-partner AI profile mid-session. |
 | `feedback_text` | `{"text": "..."}` | Echo a custom coaching message back. |
+| `debug` | `{"enabled": true}` | Toggle per-frame debug telemetry (see `debug_ack`). |
+| `calibration` | `{"action": "start" \| "done" \| "reset"}` | Strike-calibration flow (collect 5 clean punches → personalise gate thresholds). |
+| `calibration` | `{"action": "stability"}` | Hold-phone-still check → `stability_ack` (`settling`/`ready`). |
+| `ping` | `{ "t": ... }` | Client replies `pong` so the server can reap dead sockets. |
 
 Profiles: `balanced`, `aggressive`, `counter_puncher`, `defensive`,
 `pressure_fighter` (see `app/profiles.py`).
@@ -28,6 +32,8 @@ Example:
 ```json
 { "type": "reset" }
 { "type": "set_profile", "profile": "counter_puncher" }
+{ "type": "debug", "enabled": true }
+{ "type": "calibration", "action": "stability" }
 ```
 
 ### Server → Client
@@ -61,7 +67,8 @@ Example:
     { "type": "jab", "side": "left", "quality": 81, "advice": ["..."] }
   ],
   "coach": {
-    "last": { "type": "jab", "side": "left", "quality": 81, "advice": ["..."] },
+    "last": { "type": "jab", "side": "left", "quality": 81, "velocity": 0.62,
+              "confidence": 0.81, "advice": ["..."] },
     "counts": { "jab": 3, "front_kick": 1 },
     "total_strikes": 4,
     "tempo_per_s": 1.2,
@@ -69,7 +76,14 @@ Example:
   },
   "difficulty": 0.41,
   "latency_ms": 31.2,
-  "backend": "cpp"
+  "backend": "cpp",
+  "camera_stable": true,
+  "debug": {
+    "frame": 120, "camera_stable": true, "backend": "opencv",
+    "n_keypoints": 17, "velocity": 0.62, "speed_band": "medium",
+    "candidates": [{ "type": "jab", "confidence": 0.81, "velocity": 0.62 }],
+    "accepted": true, "reason": "accepted"
+  }
 }
 ```
 
@@ -119,20 +133,63 @@ second over the recent window) and `advice` (rotating professional coaching tips
 `landed`, `accuracy_pct`, `most_used`, `reaction_s`, `performance`, `duration_s`,
 `fatigue_curve`, `suggestions`, `source`, `title`, plus `type`.
 
-**`ping`** — server keep-alive every 20 s; clients should ignore it.
+**`ping`** — server keep-alive every 20 s; clients reply with `pong`.
 
 **`frame` analysis block** — every frame payload also carries `analysis`:
 
 ```json
 "analysis": {
-  "strike": { "type": "jab", "side": "left", "confidence_pct": 82, "quality": 76 },
+  "strike": { "type": "jab", "side": "left", "confidence_pct": 81,
+              "confidence": 0.81, "quality": 76, "velocity": 0.62 },
   "fatigue_score": 34, "fatigue_level": "moderate",
   "profile": "Aggressive",
   "elapsed_s": 92.4, "round": 1, "phase": "round", "phase_remain": 88,
   "speed_band": "medium",
   "tip": "Extend the jab fully…",
-  "action": "Jab thrown — good form!"
+  "action": "Jab thrown — good form!",
+  "performance": 62
 }
+```
+
+**`camera_stable`** (frame) — `true` while the camera/phone is steady; when the
+phone is moved/rotated the server pauses detection and sends
+`camera_stable: false` (empty `keypoints`/`movements` and a "hold the phone
+still" tip), so moving the phone can never fabricate strikes.
+
+**`debug`** (frame) — per-frame telemetry for the debug panel: frame #,
+`camera_stable`, `backend`, keypoint count, limb `velocity` + `speed_band`,
+each `candidates` detection (type, confidence, velocity, state), and the gate
+decision (`accepted` + `reason`).
+
+**`debug_ack`** — after `{"type":"debug","enabled":bool}`:
+```json
+{ "type": "debug_ack", "enabled": true,
+  "gate": { "min_conf": 0.6, "min_speed": 0.35, "cooldown_s": 0.3 } }
+```
+
+**`stability_ack`** — after `{"type":"calibration","action":"stability"}`:
+```json
+{ "type": "stability_ack", "status": "settling", "still_frames": 7,
+  "required": 24, "message": "Hold the phone still…" }
+```
+
+**`calibration_ack`** — after a strike-calibration `start`/`done`/`reset`:
+```json
+{ "type": "calibration_ack", "status": "started",
+  "message": "Throw 5 clean punches to calibrate." }
+```
+
+**`calibration_sample`** — streamed for every clean calibration punch:
+```json
+{ "type": "calibration_sample", "index": 3, "required": 5,
+  "velocity": 0.9, "confidence": 0.85, "technique": "jab",
+  "speeds": [0.8, 0.9], "confs": [0.84, 0.85] }
+```
+
+**`calibration_done`** — after 5 clean punches:
+```json
+{ "type": "calibration_done", "thresholds": { "min_conf": 0.7,
+  "min_speed": 0.5, "cooldown": 0.3 } }
 ```
 
 ---

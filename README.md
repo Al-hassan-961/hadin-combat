@@ -61,7 +61,8 @@ flowchart LR
 - 😮‍💨 **Fatigue analysis** — real-time fatigue score 0–100 from strike-speed decay, reaction slowing and stance wobble, with recovery advice (`app/fatigue.py`).
 - 🤖 **Sparring AI profiles** — switch mid-session between Balanced / Aggressive / Counter-Puncher / Defensive / Pressure Fighter opponents (`app/profiles.py`).
 - 📈 **Performance dashboard** — post-training charts for technique mix, fatigue trend and profile usage, with personalised improvement suggestions (`/dashboard.html`, `/api/history`).
-- 🖥️ **Live analysis panel** — real-time strike (with confidence %), fatigue score, sparring profile, round/duration timer, movement-speed indicator and 10-second coaching tips right under the camera.
+- 🖥️ **Live analysis panel** — real-time strike (with confidence %, quality & velocity), fatigue score, sparring profile, round/duration timer, movement-speed indicator and coaching tips right under the camera.
+- 🐞 **Debug mode** — a one-tap toggle (button or `?debug=1`) that logs frame-by-frame what the system sees: camera state, every candidate detection with velocity/confidence, the exact gate decision, and each calibration sample. Moving the phone pauses detection (camera ego-motion gate) so it can never fabricate strikes.
 - 🏆 **Match summary** — pressing Stop generates a full post-session report (strikes thrown/landed, accuracy %, most-used technique, reaction time, fatigue progression, performance score 0–100 and top-3 improvement tips).
 - 🎬 **Video upload & analysis** — upload an MP4/MOV/AVI sparring clip on the dashboard; it is analysed offline frame-by-frame with a progress bar, a clickable strike timeline, and the same analytics — all stored in Session History.
 - 🔊 **Voice coaching** — real-time verbal feedback via the browser's speech synthesis (optional toggle).

@@ -12,9 +12,9 @@ model, and graceful-degradation fallback mechanisms of HADIN-COMBAT.
 ```mermaid
 flowchart TB
     subgraph Client[Browser - Mobile First]
-        CAM[getUserMedia] --> CAP[capture loop 15fps]
+        CAM[getUserMedia] --> CAP[capture loop ~10fps]
         CAP -->|JPEG frames over WebSocket| WS
-        WS -->|JSON {keypoints, opponent, feedback, debug_frame}| REND[Canvas overlay]
+        WS -->|JSON {keypoints, opponent, analysis, debug}| REND[Canvas overlay]
         REND --> DISP[Neon skeleton + ghost opponent]
     end
 
@@ -43,30 +43,43 @@ flowchart TB
 ## 2. Data Flow
 
 1. **Capture** — `app.js` reads the camera via `getUserMedia` and runs a
-   ~15 fps capture loop. Each frame is drawn to an off-screen canvas (to
+   ~10 fps capture loop. Each frame is drawn to an off-screen canvas (to
    un-mirror the view), then compressed to JPEG (`quality 0.7`) and sent over
    a **binary WebSocket** message.
 
 2. **Decode** — `camera_processor.decode_jpeg_frame` decodes the JPEG bytes to
    a BGR `numpy` frame with OpenCV.
 
-3. **Pose estimation** — keypoints `(x, y, score)` are extracted by the active
-   backend (C++ ONNX Runtime **or** MediaPipe).
+3. **Camera-stability gate** — before pose estimation, a lightweight
+   `CameraMotionDetector` (`app/stability.py`) compares consecutive downscaled
+   frames. When the whole frame shifts (the phone is being moved/rotated) the
+   pipeline **pauses detection** and re-seeds the pose backend's background
+   model, so moving the phone cannot fabricate strikes. Detections stay paused
+   for a short re-learn window after the camera settles.
 
-4. **Style encoding** — a rolling window of recent poses is passed to the
+4. **Pose estimation** — keypoints `(x, y, score)` are extracted by the active
+   backend (C++ ONNX Runtime **or** MediaPipe **or** the OpenCV motion fallback).
+
+5. **Strike gating** — confident techniques pass a velocity + confidence gate
+   (`app/strike_detector.py`: min speed, >60% confidence, 300 ms debounce,
+   same-event dedupe) before counting.
+
+6. **Style encoding** — a rolling window of recent poses is passed to the
    autoencoder bottleneck, producing a **Fighting-DNA latent vector**.
 
-5. **Opponent generation** — the latent plus a difficulty scalar is fed to the
+7. **Opponent generation** — the latent plus a difficulty scalar is fed to the
    diffusion generator, producing a normalized opponent pose.
 
-6. **Co-evolution** — cumulative athlete stats update the difficulty for the
+8. **Co-evolution** — cumulative athlete stats update the difficulty for the
    next step, so the opponent improves with the athlete.
 
-7. **Feedback** — a lightweight heuristic grades posture/alignment and returns
+9. **Feedback** — a lightweight heuristic grades posture/alignment and returns
    coaching notes.
 
-8. **Render** — the server returns a `debug_frame` (skeleton already drawn) plus
-   the opponent pose; the client overlays the ghost opponent and updates the HUD.
+10. **Render** — the server returns keypoints + opponent (the client draws the
+    skeleton/ghost overlays locally) and updates the HUD. With **debug mode**
+    enabled it also returns per-frame telemetry (`debug` object): camera state,
+    candidate detections with velocity/confidence, and the gate decision.
 
 ---
 
@@ -82,9 +95,9 @@ flowchart TB
 | **Total server-side** | **~25–55 ms** | **~40–100 ms** | **~20 ms** |
 
 The design targets **sub-50 ms** server inference on mobile-class hardware
-using the C++ core and **sub-100 ms** end-to-end at 15 fps with MediaPipe.
+using the C++ core and **sub-100 ms** end-to-end at ~10 fps with MediaPipe.
 
-The client-side capture loop runs at 15 fps regardless of backend; the server
+The client-side capture loop runs at ~10 fps regardless of backend; the server
 processes frames asynchronously so the UI never blocks on a slow backend.
 
 ---
