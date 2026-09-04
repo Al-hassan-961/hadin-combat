@@ -116,22 +116,32 @@ class StrikeGate:
     def accept(self, t: float, detection: Optional[Dict[str, Any]],
                speed_per_s: Optional[float] = None) -> bool:
         """Decision: is this detection a NEW countable strike at time t?"""
+        return self.accept_verbose(t, detection, speed_per_s)[0]
+
+    def accept_verbose(self, t: float, detection: Optional[Dict[str, Any]],
+                       speed_per_s: Optional[float] = None) -> tuple[bool, str]:
+        """Like accept() but also returns WHY a candidate was (not) accepted,
+        so debug/calibration UIs can show the exact gate decision.
+
+        Returns (accepted: bool, reason: str).
+        """
         if detection is None:
-            return False
-        if float(detection.get("confidence", 0) or 0) < self.min_conf:
-            return False
+            return False, "no_candidate"
+        conf = float(detection.get("confidence", 0) or 0)
+        if conf < self.min_conf:
+            return False, f"confidence {conf:.2f}<{self.min_conf:.2f}"
         if speed_per_s is not None and self.min_speed is not None \
                 and speed_per_s < self.min_speed:
-            return False
-        if t < self._until:                     # cooldown
-            return False
+            return False, f"velocity {speed_per_s:.2f}<{self.min_speed:.2f}"
+        if t < self._until:
+            return False, f"debounce ({(self._until - t) * 1000:.0f}ms left)"
         if _same_event(detection["type"], self._last_type) \
                 and (t - self._last_time) < SAME_TYPE_WINDOW:
-            return False                        # duplicate of the same motion
+            return False, f"dedupe (same {detection['type']})"
         self._until = t + self.cooldown
         self._last_type = detection["type"]
         self._last_time = t
-        return True
+        return True, "accepted"
 
 
 def calibrate_thresholds(speeds: List[float], confs: List[float],

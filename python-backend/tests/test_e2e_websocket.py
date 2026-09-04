@@ -47,6 +47,21 @@ FRAME_BYTES: bytes = cp.jpeg_bytes(
         np.zeros((240, 320, 3), dtype=np.uint8)), 70)
 
 
+def _camera_motion_frames(n: int = 12, shift: int = 6):
+    """A sequence of JPEG frames whose whole scene translates each step,
+    simulating the phone being moved/rotated (triggers the ego-motion gate)."""
+    rng = np.random.RandomState(2)
+    base = rng.randint(40, 200, (240, 320, 3), dtype=np.uint8)
+    out = []
+    x = 0
+    for _ in range(n):
+        M = np.float32([[1, 0, x], [0, 1, 0]])
+        moved = cv2.warpAffine(base, M, (320, 240), borderMode=cv2.BORDER_REFLECT)
+        out.append({"bytes": cp.jpeg_bytes(moved, 70)})
+        x -= shift
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Real HTTP server (uvicorn subprocess)
 # ---------------------------------------------------------------------------
@@ -212,3 +227,46 @@ def test_websocket_survives_consecutive_frames():
     for msg in sent[1:]:
         assert msg["type"] == "frame"
         assert isinstance(msg["keypoints"], list)
+
+
+def test_websocket_debug_toggle_and_telemetry():
+    """Debug mode must ack, and stable frames carry per-frame telemetry."""
+    sent = _run_endpoint([
+        {"text": json.dumps({"type": "debug", "enabled": True})},
+        {"bytes": FRAME_BYTES},
+    ])
+    # hello is always sent first on connect.
+    assert sent[0]["type"] == "hello"
+    ack = next(m for m in sent if m["type"] == "debug_ack")
+    assert ack["enabled"] is True
+    assert "gate" in ack and "min_conf" in ack["gate"]
+    # A stable frame should include a debug dict with the gate fields.
+    frame = next(m for m in sent if m["type"] == "frame")
+    assert "debug" in frame
+    assert "velocity" in frame["debug"]
+    assert "camera_stable" in frame["debug"]
+    assert "accepted" in frame["debug"]
+    assert "reason" in frame["debug"]
+
+
+def test_websocket_debug_off_is_clean():
+    sent = _run_endpoint([{"text": json.dumps({"type": "debug", "enabled": False})}])
+    ack = next(m for m in sent if m["type"] == "debug_ack")
+    assert ack["enabled"] is False
+
+
+def test_camera_motion_pauses_detections():
+    """When the phone moves (whole-frame shift), the server must send
+    camera_stable=false frames and not accept any strike."""
+    sent = _run_endpoint(_camera_motion_frames(10))
+    frames = [m for m in sent if m["type"] == "frame"]
+    assert frames, "expected frame messages"
+    # After the motion detector sees the shift, camera_stable must go False.
+    assert any(m.get("camera_stable") is False for m in frames), \
+        [m.get("camera_stable") for m in frames]
+    # No strike may be accepted during camera motion.
+    for m in frames:
+        dbg = m.get("debug") or {}
+        assert dbg.get("accepted") is not True, m
+        if dbg.get("camera_stable") is False:
+            assert dbg.get("reason") == "camera_moving"

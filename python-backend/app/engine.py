@@ -195,11 +195,28 @@ class MotionPoseEstimator:
         from .camera_processor import cv2
 
         self._cv2 = cv2
+        self._history = history
+        self._var_threshold = var_threshold
         self._bg = cv2.createBackgroundSubtractorMOG2(
             history=history, varThreshold=var_threshold, detectShadows=False)
         self._prev_center: Optional[Tuple[float, float]] = None
 
     def reset(self) -> None:
+        self._prev_center = None
+
+    def reset_bg(self) -> None:
+        """Fully re-seed the background model.
+
+        After the camera/phone moves to a new view the old background model is
+        stale and keeps flagging the whole (new) scene as foreground, producing
+        a phantom skeleton for many frames. Re-creating the MOG2 model lets it
+        re-learn the new static scene cleanly.
+        """
+        from .camera_processor import cv2
+
+        self._bg = cv2.createBackgroundSubtractorMOG2(
+            history=self._history, varThreshold=self._var_threshold,
+            detectShadows=False)
         self._prev_center = None
 
     def pose_keypoints(self, frame: Any) -> Optional[List[Dict[str, float]]]:

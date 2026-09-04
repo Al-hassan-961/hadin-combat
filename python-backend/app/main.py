@@ -46,7 +46,8 @@ from .camera_processor import (
 )
 from .stability import CameraMotionDetector
 from .profiles import PROFILES, load_profile_preference
-from .strike_detector import StrikeGate, calibrate_thresholds
+from .strike_detector import (StrikeGate, calibrate_thresholds,
+                              confidence_state)
 from .engine import (
     MotionPoseEstimator,
     PurePythonCoEvolution,
@@ -233,6 +234,21 @@ class AICore:
             self._pose_misses = 0
         return None
 
+    def reset_camera_background(self) -> None:
+        """Re-seed the pose backend's background model after a camera move.
+
+        Called when the phone is detected moving. The stale background model
+        would otherwise keep flagging the new scene as foreground for many
+        frames, synthesising a phantom skeleton that fires false strikes.
+        """
+        with self._pose_lock:
+            try:
+                if self._motion is not None:
+                    self._motion.reset_bg()
+            except Exception:  # noqa: BLE001
+                pass
+            self._pose_misses = 0
+
     def _degrade_if_stuck(self) -> None:
         if self._backend_errors < 10:
             return
@@ -341,6 +357,9 @@ UPLOAD_DIR = BASE_DIR / "data" / "uploads"
 # Live "rounds" for the timer HUD.
 ROUND_SECONDS = 180     # 3-minute rounds
 REST_SECONDS = 60       # 1-minute rest between rounds
+# Frames to keep detections paused after the camera settles, giving the motion
+# backend (MOG2) time to re-learn the new static scene and avoid phantom strikes.
+RELEARN_GRACE_FRAMES = 20
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +394,8 @@ class SessionManager:
             "_cal": None,                    # live calibration state
             "camera_stable": True,           # phone / camera ego-motion gate
             "camera_det": CameraMotionDetector(),  # per-session stability gate
+            "_debug": bool(os.getenv("HADIN_DEBUG")),  # per-session debug toggle
+            "_dbg": {},                      # per-frame debug telemetry
             # Post-session summary / live-panel accumulators.
             "quality_list": [],          # (quality, confidence) per landed strike
             "fatigue_progression": [],   # [elapsed_s, fatigue_score] samples
@@ -571,6 +592,19 @@ async def process_frame(websocket: WebSocket, client_id: str,
     t0 = time.perf_counter()
     h, w = frame.shape[:2]
 
+    # Base per-frame debug telemetry (filled fully once keypoints exist).
+    dbg = sess.setdefault("_dbg", {})
+    dbg.update({
+        "frame": sess["frames"],
+        "backend": ai_core.backend,
+        "camera_stable": bool(sess.get("camera_stable", True)),
+        "velocity": 0.0,
+        "speed_band": "slow",
+        "candidates": [],
+        "accepted": False,
+        "reason": "no_keypoints",
+    })
+
     # ---- camera / phone ego-motion gate ------------------------------------
     # If the phone is moving/rotating, the whole frame shifts and the pose
     # backend (esp. the OpenCV motion fallback) would read that as athlete
@@ -581,14 +615,27 @@ async def process_frame(websocket: WebSocket, client_id: str,
     was_stable = sess.get("camera_stable", True)
     sess["camera_stable"] = stable
     if was_stable and not stable:
-        # Camera just started moving: drop any in-progress technique/buffer so
-        # stale motion cannot commit once the camera settles.
+        # Camera just started moving: drop any in-progress technique/buffer and
+        # re-seed the pose backend's background model so the NEW scene is
+        # learned cleanly instead of being read as a huge phantom skeleton.
         sess["movement"].reset()
         sess["_prev_norm"] = None
         sess["strike_gate"].reset()
+        sess["_relearn_remaining"] = RELEARN_GRACE_FRAMES
+        ai_core.reset_camera_background()
+        logger.info("camera motion detected for %s — pausing detections to "
+                    "re-seed background.", client_id)
+    elif stable and sess.get("_relearn_remaining", 0) > 0:
+        # Keep detections paused while the motion backend re-learns the new
+        # static scene, so it cannot fire phantom strikes during re-seeding.
+        sess["_relearn_remaining"] -= 1
+        stable = False
+        sess["camera_stable"] = False
 
     if not stable:
         # Still send a lightweight analysis so the UI can show "hold still".
+        dbg.update({"camera_stable": False, "accepted": False,
+                    "reason": "camera_moving", "candidates": []})
         await websocket.send_json({
             "type": "frame", "client_id": client_id,
             "analysis": _camera_unstable_analysis(sess),
@@ -602,6 +649,7 @@ async def process_frame(websocket: WebSocket, client_id: str,
             "latency_ms": round((time.perf_counter() - t0) * 1000, 2),
             "backend": ai_core.backend,
             "camera_stable": False,
+            "debug": dict(sess.get("_dbg", {})),
         })
         return
 
@@ -642,9 +690,43 @@ async def process_frame(websocket: WebSocket, client_id: str,
         gate = sess["strike_gate"]
         now = time.time()
         candidate = gate.pick(movements)
-        accepted = candidate is not None and gate.accept(now, candidate, speed_per_s)
+        accepted_ok, gate_reason = gate.accept_verbose(now, candidate, speed_per_s) \
+            if candidate is not None else (False, "no_candidate")
+        accepted = accepted_ok
 
         calibrating = bool(sess.get("_cal"))
+
+        # ---- debug telemetry -----------------------------------------------
+        # Expose what the system "sees" each frame: camera state, backend, every
+        # candidate detection with velocity + confidence, and the gate decision.
+        dbg = sess.setdefault("_dbg", {})
+        dbg.update({
+            "camera_stable": bool(sess.get("camera_stable", True)),
+            "backend": ai_core.backend,
+            "n_keypoints": len(norm) if draw_kps else 0,
+            "velocity": round(speed_per_s, 3),
+            "speed_band": speed_band_live,
+            "candidates": [
+                {"type": d.get("type"), "side": d.get("side"),
+                 "confidence": round(float(d.get("confidence", 0) or 0), 3),
+                 "quality": d.get("quality"),
+                 "velocity": round(speed_per_s, 3),
+                 "state": confidence_state(float(d.get("confidence", 0) or 0))}
+                for d in movements
+                if d.get("type") and d.get("type") not in ("guard", "stance")
+            ],
+            "accepted": accepted,
+            "reason": gate_reason,
+        })
+        if sess.get("_debug") and os.getenv("HADIN_DEBUG") or sess.get("_debug"):
+            if sess["frames"] % 5 == 0 or accepted or candidate is not None:
+                logger.info(
+                    "dbg f#%s cam=%s backend=%s kps=%d vel=%.3f cand=%s "
+                    "accept=%s (%s)",
+                    sess["frames"], dbg["camera_stable"], dbg["backend"],
+                    dbg["n_keypoints"], dbg["velocity"],
+                    [f"{c['type']}({c['confidence']})" for c in dbg["candidates"]],
+                    accepted, gate_reason)
 
         if accepted:
             if calibrating:
@@ -653,14 +735,18 @@ async def process_frame(websocket: WebSocket, client_id: str,
                 coach = sess["coach"].update([], now=now)
                 _maybe_calibrate(websocket, client_id, sess, candidate, speed_per_s)
             else:
-                coach = sess["coach"].update([candidate], now=now)
+                cand = dict(candidate)
+                cand["velocity"] = round(speed_per_s, 3)   # debug telemetry
+                coach = sess["coach"].update([cand], now=now)
                 sess["_strikes_seen"] = sess.get("_strikes_seen", 0) + 1
+                # Remember the velocity for this strike so debug shows it.
+                sess.setdefault("_strike_velocities", []).append(round(speed_per_s, 3))
                 snap = min(1.0, speed_per_s / 2.0) if speed_per_s > 0.2 else (
-                    float(candidate.get("confidence", 0.5)) * 0.5 +
-                    (float(candidate.get("quality", 50)) / 100.0) * 0.5)
+                    float(cand.get("confidence", 0.5)) * 0.5 +
+                    (float(cand.get("quality", 50)) / 100.0) * 0.5)
                 sess["fatigue"].observe_strike(snap, now)
                 sess.setdefault("quality_list", []).append(
-                    [candidate.get("quality", 0), candidate.get("confidence", 0)])
+                    [cand.get("quality", 0), cand.get("confidence", 0)])
                 ql = sess.get("quality_list") or []
                 sess["_quality_running"] = sum(x[0] for x in ql) / len(ql) if ql else 0
         else:
@@ -718,7 +804,9 @@ async def process_frame(websocket: WebSocket, client_id: str,
     if latest:
         strike = {"type": latest.get("type"), "side": latest.get("side"),
                   "confidence_pct": round((latest.get("confidence", 0) or 0) * 100),
-                  "quality": latest.get("quality")}
+                  "confidence": round(float(latest.get("confidence", 0) or 0), 3),
+                  "quality": latest.get("quality"),
+                  "velocity": latest.get("velocity")}
 
     action = "Stay light on your feet — pick your moments."
     if strike:
@@ -781,6 +869,7 @@ async def process_frame(websocket: WebSocket, client_id: str,
         "latency_ms": round(latency_ms, 2),
         "backend": ai_core.backend,
         "camera_stable": True,
+        "debug": dict(sess.get("_dbg", {})),   # per-frame telemetry for debug UI
     }
     # Debug aid: with HADIN_DEBUG=1 the server logs ~every 20th frame so you
     # can confirm analysis is being produced and sent (check uvicorn output).
@@ -851,6 +940,21 @@ async def _maybe_calibrate(websocket: WebSocket, client_id: str,
         return
     cal.setdefault("speeds", []).append(speed_per_s)
     cal.setdefault("confs", []).append(conf)
+    cal.setdefault("types", []).append(candidate.get("type"))
+    # Stream every captured sample to the UI (debug + calibration feedback).
+    try:
+        await websocket.send_json({
+            "type": "calibration_sample",
+            "index": len(cal["speeds"]),
+            "required": 5,
+            "velocity": round(speed_per_s, 3),
+            "confidence": round(conf, 3),
+            "technique": candidate.get("type"),
+            "speeds": [round(x, 3) for x in cal["speeds"]],
+            "confs": [round(x, 3) for x in cal["confs"]],
+        })
+    except Exception:  # noqa: BLE001
+        pass
     if len(cal["speeds"]) >= 5:
         await _finalize_calibration(websocket, client_id, sess)
 
@@ -909,6 +1013,17 @@ async def handle_json(websocket: WebSocket, client_id: str, text: str) -> None:
                 "message": ("Camera stable — detection enabled."
                             if ready else "Hold the phone still…"),
             })
+    elif msg_type == "debug":
+        # Toggle per-session verbose debug mode (frame-by-frame telemetry).
+        if sess:
+            enabled = bool(data.get("enabled", False))
+            sess["_debug"] = enabled
+            await websocket.send_json({"type": "debug_ack", "enabled": enabled,
+                                       "gate": {
+                                           "min_conf": sess["strike_gate"].min_conf,
+                                           "min_speed": sess["strike_gate"].min_speed,
+                                           "cooldown_s": sess["strike_gate"].cooldown,
+                                       }})
     elif msg_type == "set_profile":
         from .profiles import PROFILE_NAMES, save_profile_preference
         name = str(data.get("profile", ""))

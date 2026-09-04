@@ -270,6 +270,8 @@ body {
 }
 .chip b { color: var(--neon); }
 .chip-dim { color: var(--muted); }
+#calSamples { flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
+.cal-chip { border-color: rgba(6, 247, 247, 0.35); background: var(--neon-dim); }
 
 /* ---- Fatigue meter + sparring profile -------------------------------------- */
 .fatigue-row, .profile-row {

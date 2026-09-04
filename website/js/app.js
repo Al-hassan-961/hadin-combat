@@ -168,12 +168,7 @@
         }
         if (msg.type === 'frame') {
             _frameLogCount++;
-            if (_frameLogCount === 1 || _frameLogCount % 90 === 0) {
-                logHADIN('frame', '#' + _frameLogCount,
-                    'analysis?', !!msg.analysis,
-                    'keypoints?', !!(msg.keypoints && msg.keypoints.length),
-                    'backend', msg.backend);
-            }
+            logFrameTelemetry(msg, _frameLogCount);
             try {
                 renderFrame(msg);
             } catch (err) {
@@ -200,8 +195,22 @@
             const st = document.getElementById('calStatus');
             if (st) st.style.display = 'none';
             const t = (msg.thresholds || {});
+            renderCalibrationSamples([]);      // clear the live list
             toast('Calibrated! min confidence ' + Math.round((t.min_conf || 0.6) * 100) +
                 '%, min speed ' + t.min_speed, '🎯');
+        }
+        if (msg.type === 'calibration_sample') {
+            renderCalibrationSamples(msg.speeds || [], msg.confs || [],
+                msg.index, msg.required);
+            logHADIN('cal', 'sample #' + msg.index + '/' + msg.required +
+                ' vel=' + msg.velocity + ' conf=' + msg.confidence +
+                ' (' + (msg.technique || '?') + ')');
+        }
+        if (msg.type === 'debug_ack') {
+            logHADIN('debug', 'server ack enabled=' + msg.enabled +
+                ' gate min_conf=' + ((msg.gate && msg.gate.min_conf) || '?') +
+                ' min_speed=' + ((msg.gate && msg.gate.min_speed) || '?') +
+                ' cooldown=' + ((msg.gate && msg.gate.cooldown_s) || '?'));
         }
         if (msg.type === 'stability_ack') {
             const st = document.getElementById('stabilizeStatus');
@@ -581,6 +590,21 @@
     }
 
     // ---- LIVE ANALYSIS PANEL ------------------------------------------------
+    // Show the live calibration samples being captured (velocity + confidence
+    // per clean punch), and clear it once calibration completes.
+    function renderCalibrationSamples(speeds, confs, index, required) {
+        const el = document.getElementById('calSamples');
+        if (!el) return;
+        if (!speeds || !speeds.length) { el.style.display = 'none'; return; }
+        el.style.display = 'flex';
+        const rows = speeds.map((v, i) =>
+            '<span class="chip cal-chip">#' + (i + 1) + ' ' +
+            (Math.round(v * 100)) + '% vel · ' +
+            Math.round((confs && confs[i]) ? confs[i] * 100 : 0) + '% conf</span>').join('');
+        el.innerHTML = '<span class="live-label">Calibration ' +
+            (index != null ? index + '/' + (required || 5) : '') + '</span>' + rows;
+    }
+
     function fmtClock(sec) {
         sec = Math.max(0, Math.floor(sec || 0));
         const m = Math.floor(sec / 60), s = sec % 60;
@@ -643,16 +667,74 @@
     // ANALYSIS DEBUG & CANONICAL UI (strikeCount, fatigueScore, currentStrike,
     // sessionTimer, coachingTip, strikeHistory, accuracyDisplay, performanceScore)
     // ==========================================================================
-    const HADIN_DEBUG = new URLSearchParams(location.search).has('debug') ||
+    // Debug mode: enabled by ?debug=1 / hc.debug, or toggled live by the Debug
+    // button (which also tells the server to include per-frame telemetry).
+    let debugMode = new URLSearchParams(location.search).has('debug') ||
         localStorage.getItem('hc.debug') === '1';
+    function setDebug(on) {
+        debugMode = !!on;
+        try { localStorage.setItem('hc.debug', on ? '1' : '0'); } catch (_) {}
+        // Tell the server to send per-frame debug telemetry.
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'debug', enabled: !!on }));
+        }
+        const btn = document.getElementById('debugBtn');
+        if (btn) btn.classList.toggle('btn-active', !!on);
+        toast(debugMode ? 'Debug mode ON — see console' : 'Debug mode OFF', '🐞');
+    }
     function logHADIN(tag) {
-        if (!HADIN_DEBUG) return;
+        if (!debugMode) return;
         const args = [].slice.call(arguments, 1);
         console.log('%c[HADIN:' + tag + ']', 'color:#06f7f7;font-weight:bold', ...args);
     }
     let _frameLogCount = 0;
     let _strikeHistory = [];
     let _lastMock = null;
+
+    // Detailed per-frame telemetry logger (what the system "sees").
+    function logFrameTelemetry(msg, frameNo) {
+        if (!debugMode) return;
+        const dbg = msg.debug || {};
+        const cam = msg.camera_stable !== false ? 'stable' : 'MOVING';
+        const strike = (msg.analysis && msg.analysis.strike) || {};
+        // Throttle: log every frame is too noisy; log all when a candidate or
+        // accepted strike exists, plus ~every 10th frame otherwise.
+        const hasSig = (dbg.candidates && dbg.candidates.length) ||
+            (dbg.accepted) || strike.type;
+        if (!hasSig && frameNo % 10 !== 0) return;
+        console.groupCollapsed('%c[HADIN:frame] #' + frameNo + ' cam=' + cam +
+            ' backend=' + (dbg.backend || msg.backend), 'color:#06f7f7');
+        console.log('analysis:', msg.analysis || '(unstable)');
+        if (msg.coach) {
+            const last = msg.coach.last;
+            if (last) {
+                console.log('%cSTRIKE: %s %s vel=%s conf=%s%% quality=%s',
+                    'color:#22d3ee;font-weight:bold',
+                    (last.type || '?').replace(/_/g, ' '), last.side || '',
+                    (last.velocity != null ? last.velocity : '?'),
+                    Math.round((last.confidence || 0) * 100),
+                    (last.quality != null ? last.quality : '?'));
+            }
+        }
+        if (strike.type) {
+            console.log('velocity=%s conf=%s%% quality=%s',
+                (strike.velocity != null ? strike.velocity : '?'),
+                (strike.confidence_pct != null ? strike.confidence_pct : '?'),
+                (strike.quality != null ? strike.quality : '?'));
+        }
+        if (dbg.candidates && dbg.candidates.length) {
+            console.log('candidates:', dbg.candidates.map((c) =>
+                c.type + ' conf=' + (c.confidence * 100).toFixed(0) +
+                '% vel=' + c.velocity + ' [' + c.state + ']').join(' | '));
+        } else {
+            console.log('candidates: none');
+        }
+        if (dbg.velocity !== undefined) {
+            console.log('frame velocity=' + dbg.velocity + ' (' + (dbg.speed_band || '?') + ')');
+        }
+        console.log('gate: accept=' + dbg.accepted + ' reason=' + dbg.reason);
+        console.groupEnd();
+    }
 
     // Canonical writer — fills the #strikeCount/#fatigueScore/... elements.
     function updateAnalysis(a, coach) {
@@ -919,6 +1001,17 @@
                 }
             }, 1000);
         });
+    }
+
+    // ---- Debug toggle --------------------------------------------------------
+    els.debugBtn = els.debugBtn || document.getElementById('debugBtn');
+    if (els.debugBtn) {
+        els.debugBtn.classList.toggle('btn-active', debugMode);
+        els.debugBtn.addEventListener('click', () => setDebug(!debugMode));
+    }
+    // If debug was enabled before the WS connected, push it on open.
+    if (debugMode && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'debug', enabled: true }));
     }
 
     // ---- View toggles: skeleton / ghost / mirror ----------------------------
