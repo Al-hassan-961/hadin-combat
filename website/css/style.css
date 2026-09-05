@@ -535,3 +535,10 @@ input[type="range"] {
     accent-color: var(--neon);
     margin-top: 6px;
 }
+
+/* ---- Real-time AI analysis (loading pulse) ------------------------------- */
+.ai-loading {
+    font-size: 0.7rem; color: var(--electric);
+    animation: aiPulse 0.9s ease-in-out infinite alternate;
+}
+@keyframes aiPulse { to { opacity: 0.35; } }

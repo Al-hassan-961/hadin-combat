@@ -42,6 +42,8 @@
     let mirrorView = false;     // natural view by default (no flip)
     let stream = null;
     let captureTimer = null;
+    let analyzeTimer = null;            // 500ms frame->Gemini poller
+    let analyzing = false;              // true while an /api/analyze_frame call is in flight
     let lastFrameTime = 0;
     let framesInWindow = 0;
     let fpsWindowStart = 0;
@@ -306,6 +308,80 @@
             captureTimer = null;
         }
         els.overlay.width = els.overlay.height = 0;
+    }
+
+    // ---- Real-time Gemini frame analysis (every 500 ms) --------------------
+    // Grabs the current camera frame, POSTs it to /api/analyze_frame and shows
+    // the returned strike / confidence / form / feedback plus a loading pulse.
+    function setAnalyzing(on) {
+        analyzing = on;
+        const ind = document.getElementById('aiLoading');
+        if (ind) ind.hidden = !on;
+    }
+
+    function renderFrameAnalysis(a) {
+        const g = (id) => document.getElementById(id);
+        const strike = (a && a.strike_type) || 'none';
+        const conf = (a && a.confidence) || 0;
+        const form = (a && a.form_score) || 0;
+        const fb = (a && a.feedback) || '';
+        const follow = (a && a.suggested_follow_up) || '';
+        const label = strike !== 'none' && MOVE_LABELS[strike]
+            ? MOVE_LABELS[strike] : (strike !== 'none' ? strike : '—');
+        if (g('liveStrike')) g('liveStrike').textContent = label;
+        if (g('liveStrikeConf')) {
+            g('liveStrikeConf').textContent = strike !== 'none'
+                ? conf + '% conf · form ' + form : '';
+        }
+        if (g('accuracyDisplay')) g('accuracyDisplay').textContent = form + '%';
+        // Dedicated fields if present.
+        if (g('aiStrikeType')) g('aiStrikeType').textContent = label;
+        if (g('aiFormScore')) g('aiFormScore').textContent = form + '%';
+        if (g('aiConfidence')) g('aiConfidence').textContent = conf + '%';
+        if (g('aiFeedback')) g('aiFeedback').textContent = fb || '—';
+        if (g('aiFollowUp')) {
+            g('aiFollowUp').textContent = follow ? 'Next: ' + follow : '';
+        }
+        if (debugMode) logHADIN('ai', 'strike=' + strike + ' conf=' + conf +
+            ' form=' + form + ' fb=' + fb);
+    }
+
+    function startAnalyzer() {
+        stopAnalyzer();
+        const tick = async () => {
+            if (!running || !els.video || !els.video.readyState) return;
+            if (analyzing) return;   // don't stack calls
+            setAnalyzing(true);
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = els.video.videoWidth || 320;
+                canvas.height = els.video.videoHeight || 240;
+                const c = canvas.getContext('2d');
+                c.drawImage(els.video, 0, 0);
+                const blob = await new Promise((res) =>
+                    canvas.toBlob(res, 'image/jpeg', 0.6));
+                if (!blob) return;
+                const fd = new FormData();
+                fd.append('image', blob, 'frame.jpg');
+                const r = await fetch('/api/analyze_frame', {
+                    method: 'POST', body: fd,
+                });
+                if (r.ok) {
+                    renderFrameAnalysis(await r.json());
+                }
+            } catch (err) {
+                if (debugMode) console.error('[HADIN:ai] analyze error', err);
+            } finally {
+                setAnalyzing(false);
+            }
+        };
+        tick();
+        analyzeTimer = setInterval(tick, 500);
+    }
+
+    function stopAnalyzer() {
+        if (analyzeTimer) { clearInterval(analyzeTimer); analyzeTimer = null; }
+        setAnalyzing(false);
     }
 
     // ---- Frame capture -----------------------------------------------------
@@ -956,12 +1032,14 @@
             els.startBtn.textContent = '■ Stop';
             els.startBtn.classList.add('recording');
             captureLoop();
+            startAnalyzer();           // real-time Gemini frame analysis
             if (!ws || ws.readyState !== WebSocket.OPEN) connect();
         } else {
             running = false;
             els.startBtn.textContent = '▶ Start';
             els.startBtn.classList.remove('recording');
             stopCamera();
+            stopAnalyzer();            // stop the 500ms analysis poller
             els.stageMessage.style.display = 'flex';
             // Ask the server for the end-of-session match summary.
             if (ws && ws.readyState === WebSocket.OPEN) {

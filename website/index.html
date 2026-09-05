@@ -135,6 +135,24 @@
                         <div class="live-cell" style="flex:2"><span class="live-label">Coaching tip</span>
                             <span class="live-big" id="coachingTip" style="font-size:.85rem;font-weight:500">—</span></div>
                     </div>
+                    <!-- AI analysis (real-time /api/analyze_frame) -->
+                    <div class="live-row" style="border-top:1px solid var(--glass-border);padding-top:6px">
+                        <div class="live-cell"><span class="live-label">Strike</span>
+                            <span class="live-big" id="aiStrikeType">—</span>
+                            <span class="ai-loading" id="aiLoading" hidden>⏳ analyzing…</span></div>
+                        <div class="live-cell"><span class="live-label">Confidence</span>
+                            <span class="live-big" id="aiConfidence">—</span></div>
+                        <div class="live-cell"><span class="live-label">Form</span>
+                            <span class="live-big" id="aiFormScore">—</span></div>
+                    </div>
+                    <div class="live-row">
+                        <div class="live-cell" style="flex:2"><span class="live-label">Feedback</span>
+                            <span class="live-big" id="aiFeedback" style="font-size:.85rem;font-weight:500">—</span></div>
+                    </div>
+                    <div class="live-row">
+                        <div class="live-cell" style="flex:2"><span class="live-label">Suggested next</span>
+                            <span class="live-big" id="aiFollowUp" style="font-size:.85rem;font-weight:500">—</span></div>
+                    </div>
                     <div class="coach-counts" id="strikeHistory"></div>
                 </section>
 

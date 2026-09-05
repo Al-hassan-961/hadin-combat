@@ -47,6 +47,7 @@ from .camera_processor import (
 from .stability import CameraMotionDetector
 from .profiles import PROFILES, load_profile_preference
 from .gemini_free import SilentCoach, get_coach
+from .gemini_analyzer import GeminiAnalyzer
 from .strike_detector import (StrikeGate, calibrate_thresholds,
                               confidence_state)
 from .engine import (
@@ -360,6 +361,18 @@ UPLOAD_DIR = BASE_DIR / "data" / "uploads"
 # and the local ML engine is used. It never surfaces a provider name in the UI.
 ai_coach = get_coach()
 AI_COACH_AVAILABLE = ai_coach.enabled
+
+# Step 1 analyzer: single-image Gemini analysis (official free tier via
+# GEMINI_API_KEY, or the localhost proxy if GEMINI_PROXY_URL is set). Lazy so
+# that a missing key/SDK never prevents the server from booting.
+_analyzer = None
+
+
+def _get_analyzer() -> GeminiAnalyzer:
+    global _analyzer
+    if _analyzer is None:
+        _analyzer = GeminiAnalyzer()
+    return _analyzer
 
 # Live "rounds" for the timer HUD.
 ROUND_SECONDS = 180     # 3-minute rounds
@@ -1190,6 +1203,53 @@ _archived_videos: set = set()
 _ALLOWED_VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
 
 
+async def api_analyze(request) -> JSONResponse:
+    """Analyse a single camera frame (image bytes) -> Gemini analysis JSON.
+
+    Accepts the raw image bytes as the request body, or a multipart upload with
+    a field named ``image``/``file``. Returns the canonical analysis dict
+    (strike_type, confidence, form_score, fatigue_score, feedback, stance,
+    guard, speed, suggested_follow_up). If the analyzer is unavailable it
+    returns a neutral analysis so the frontend never breaks.
+    """
+    image_bytes: Optional[bytes] = None
+    try:
+        # Multipart form upload.
+        form = await request.form()
+        for key in ("image", "file"):
+            up = form.get(key)
+            if up is not None and hasattr(up, "read"):
+                image_bytes = await up.read()
+                break
+    except Exception:  # noqa: BLE001
+        image_bytes = None
+    if image_bytes is None:
+        try:
+            image_bytes = await request.body()
+        except Exception:  # noqa: BLE001
+            image_bytes = None
+    if not image_bytes:
+        return JSONResponse({"error": "no image data (send body or field 'image')"},
+                            status_code=400)
+
+    analyzer = _get_analyzer()
+    try:
+        result = analyzer.analyze_image(image_bytes)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("frame analysis error: %s", exc)
+        result = None
+    if not isinstance(result, dict) or result is None:
+        result = {
+            "strike_type": "none", "confidence": 0, "form_score": 0,
+            "fatigue_score": 0, "feedback": "", "stance": "balanced",
+            "guard": "up", "speed": "medium", "suggested_follow_up": "",
+            "source": "unavailable",
+        }
+        return JSONResponse(result)
+    result.setdefault("source", "gemini")
+    return JSONResponse(result)
+
+
 async def api_analyze_upload(request) -> JSONResponse:
     """Upload a sparring video for offline analysis -> {job_id}."""
     try:
@@ -1335,6 +1395,7 @@ _routes = [
     Route("/api/stats", endpoint=api_stats, methods=["GET"]),
     Route("/api/history", endpoint=api_history, methods=["GET"]),
     Route("/api/analyze", endpoint=api_analyze_upload, methods=["POST"]),
+    Route("/api/analyze_frame", endpoint=api_analyze, methods=["POST"]),
     Route("/api/analyze/{job_id}", endpoint=api_analyze_status, methods=["GET"]),
     Route("/api/session/{client_id}", endpoint=api_session, methods=["GET"]),
     WebSocketRoute("/ws/{client_id}", endpoint=ws_endpoint),
